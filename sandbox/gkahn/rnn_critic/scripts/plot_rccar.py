@@ -3230,6 +3230,65 @@ def plot_cluttered_hallway_lifelong_standalone():
     f_cumreward.savefig(os.path.join(SAVE_FOLDER, '{0}.png'.format(FILE_NAME)), bbox_inches='tight', dpi=200)
     plt.close(f_cumreward)
 
+def plot_cluttered_hallway_lifelong_standalone_release():
+    font = {'family': 'serif',
+            'weight': 'normal',
+            'size': 15}
+    matplotlib.rc('font', **font)
+
+    FILE_NAME = 'rccar_paper_cluttered_hallway_lifelong_standalone_release'
+    all_exps = [AnalyzeRNNCritic(os.path.join('/home/gkahn/code/rllab/data/local/sim-rccar', name),
+                                 clear_obs=True,
+                                 create_new_envs=False,
+                                 load_train_rollouts=False,
+                                 load_eval_rollouts=False) for name in ('dql', 'nstep_dql', 'probcoll')]
+    all_exps = [[exps] for exps in all_exps]
+
+    titles = ['Double\nQ-learning', '5-step Double\nQ-learning', 'Our\napproach']
+    colors = ['k', 'm', 'g']
+
+    f_cumreward, axes_cumreward = plt.subplots(1, 1, figsize=(6, 3), sharey=False, sharex=True)
+    if not hasattr(axes_cumreward, '__len__'):
+        axes_cumreward = np.array([axes_cumreward])
+
+    window = 32
+    ylim = (0, 2100)
+    xmax_timesteps = 8e5
+
+    for exp, title, color in zip(all_exps, titles, colors):
+        plot_cumreward(axes_cumreward[0], exp, window=window, ylim=ylim, plot_indiv=False, convert_to_time=True, label=title, color=color)
+
+    # set same x-axis
+    xmax = xmax_timesteps * (0.25 / 3600.)
+    for ax in axes_cumreward:
+        ax.set_ylim(ylim)
+        ax.set_xlim((0, xmax))
+        ax.yaxis.set_ticks(np.arange(0, 2100, 500))
+        ax.set_yticklabels([''] * len(ax.get_yticklabels()))
+        ax.yaxis.set_ticks_position('both')
+
+        ax.legend(ncol=len(all_exps), loc='upper center', bbox_to_anchor=(0.5, 1.4))
+
+    f_cumreward.text(0.5, -0.05, 'Time (hours)', ha='center', fontdict=font)
+
+    ax = axes_cumreward[0]
+    ax.set_yticklabels(['', '250', '500', '750', '1000', ''])
+    ax.set_ylabel('Distance (m)', fontdict=font)
+
+    # add y-axis on right side which is hallway lengths
+    ax = axes_cumreward[-1]
+    ax_twin = ax.twinx()
+    ax_twin.set_xlim((ax.get_xlim()))
+    ax_twin.set_ylim((ax.get_ylim()))
+    ax_twin.set_yticks(ax.get_yticks())
+    ax_twin.yaxis.tick_right()
+    ax_twin.set_yticklabels(['', '3', '6', '9', '12', ''])
+    ax_twin.set_ylabel('Hallway lengths', fontdict=font)
+    ax_twin.yaxis.set_label_position("right")
+
+    f_cumreward.savefig(os.path.join(SAVE_FOLDER, '{0}.png'.format(FILE_NAME)), bbox_inches='tight', dpi=200)
+    plt.close(f_cumreward)
+
 # plot_2445_2516()
 # plot_2518_2577_and_2796_2819()
 # plot_2578_2637_and_2820_2843()
@@ -3256,8 +3315,11 @@ def plot_cluttered_hallway_lifelong_standalone():
 # plot_dd_heatmap_empty_hallway_lifelong()
 # plot_dd_heatmap_cluttered_hallway_lifelong()
 
-plot_dd_cluttered_hallway_lifelong_outputs_loss()
-plot_dd_cluttered_hallway_lifelong_horizon()
-plot_dd_cluttered_hallway_lifelong_bootstrapping()
 
-plot_cluttered_hallway_lifelong_standalone()
+# plot_dd_cluttered_hallway_lifelong_outputs_loss()
+# plot_dd_cluttered_hallway_lifelong_horizon()
+# plot_dd_cluttered_hallway_lifelong_bootstrapping()
+
+# plot_cluttered_hallway_lifelong_standalone()
+
+plot_cluttered_hallway_lifelong_standalone_release()
