@@ -1,4 +1,4 @@
-import os, pickle
+import os, pickle, copy
 import numpy as np
 import itertools
 
@@ -2522,7 +2522,7 @@ matplotlib.rc('font', **font)
 def plot_env_type(FILE_NAME, all_exps, titles, xmax_timesteps, show_title, show_xlabel, plot_title, xtext=0):
     f_cumreward, axes_cumreward = plt.subplots(1, len(all_exps), figsize=(2*len(all_exps), 2), sharey=False, sharex=True)
 
-    window = 16
+    window = 32
     ylim = (0, 2100)
     success_cumreward = [500, 1000, 1500, 1750]
 
@@ -2584,7 +2584,7 @@ def plot_empty_hallway_reset():
     all_exps = [load_experiments(range(i, i + 3), load_eval_rollouts=False) for i in range(2445, 2460, 3)] + \
                [load_experiments(range(2557, 2557 + 3), load_eval_rollouts=False)]
     titles = ['Double\nQ-learning', '5-step Double\nQ-learning', '10-step Double\nQ-learning', '5-step MAQL',
-              '10-step MAQL', 'Collision\nPrediction (ours)']
+              '10-step MAQL', 'Ours']
 
     plot_env_type(FILE_NAME, all_exps, titles, xmax_timesteps=2e5, show_title=True, show_xlabel=False,
                   plot_title='(a) Empty hallway\n(reset)')
@@ -2595,10 +2595,10 @@ def plot_empty_hallway_lifelong():
     all_exps = [load_experiments(range(i, i + 3), load_eval_rollouts=False) for i in range(2463, 2478, 3)] + \
                [load_experiments(range(2617, 2617 + 3), load_eval_rollouts=False)]
     titles = ['Double\nQ-learning', '5-step Double\nQ-learning', '10-step Double\nQ-learning', '5-step MAQL',
-              '10-step MAQL', 'Collision\nPrediction (ours)']
+              '10-step MAQL', 'Ours']
 
     plot_env_type(FILE_NAME, all_exps, titles, xmax_timesteps=4e5, show_title=False, show_xlabel=False,
-                  plot_title='(b) Empty hallway\n(lifelong)')
+                  plot_title='(b) Empty hallway\n(continuous)')
 
 def plot_cluttered_hallway_reset():
     FILE_NAME = 'rccar_paper_cluttered_hallway_reset'
@@ -2607,7 +2607,7 @@ def plot_cluttered_hallway_reset():
                [load_experiments(range(2677, 2677 + 3), load_eval_rollouts=False)]
     all_exps[1] = [all_exps[1][0], all_exps[1][2]]
     titles = ['Double\nQ-learning', '5-step Double\nQ-learning', '10-step Double\nQ-learning', '5-step MAQL',
-              '10-step MAQL', 'Collision\nPrediction (ours)']
+              '10-step MAQL', 'Ours']
 
     plot_env_type(FILE_NAME, all_exps, titles, xmax_timesteps=4e5, show_title=False, show_xlabel=False,
                   plot_title='(c) Cluttered hallway\n(reset)')
@@ -2618,10 +2618,10 @@ def plot_cluttered_hallway_lifelong():
     all_exps = [load_experiments(range(i, i + 3), load_eval_rollouts=False) for i in range(2499, 2514, 3)] + \
                [load_experiments(range(2737, 2737 + 3), load_eval_rollouts=False)]
     titles = ['Double\nQ-learning', '5-step Double\nQ-learning', '10-step Double\nQ-learning', '5-step MAQL',
-              '10-step MAQL', 'Collision\nPrediction (ours)']
+              '10-step MAQL', 'Ours']
 
     plot_env_type(FILE_NAME, all_exps, titles, xmax_timesteps=8e5, show_title=False, show_xlabel=True,
-                  plot_title='(d) Cluttered hallway\n(lifelong)')
+                  plot_title='(d) Cluttered hallway\n(continuous)')
 
 def plot_priority_replay_empty_hallway_reset():
     FILE_NAME = 'rccar_paper_priority_replay_empty_hallway_reset'
@@ -2671,7 +2671,7 @@ def plot_design_decisions(FILE_NAME, all_exps):
     assert(len(all_exps) == 28)
     f_cumreward, axes_cumreward = plt.subplots(7, 4, figsize=(8, 14), sharey=True, sharex=True)
 
-    window = 16
+    window = 32
     ylim = (0, 2100)
     success_cumreward = [500, 1000, 1500, 1750]
 
@@ -2702,16 +2702,16 @@ def plot_design_decisions(FILE_NAME, all_exps):
                 title = ''
                 if params['policy']['class'] == 'MACPolicy':
                     if params['policy']['use_target']:
-                        title += 'MAQL, H: {0}, H target: {1}'.format(
+                        title += 'value, H: {0}, H bootstrap: {1}'.format(
                             params['policy']['H'],
                             params['policy']['get_action_target']['H']
                         )
                     else:
-                        title += 'MAQL, H: {0}, no target'.format(
+                        title += 'value, H: {0}, no bootstrap'.format(
                             params['policy']['H'],
                         )
                 elif params['policy']['class'] == 'RCcarMACPolicy':
-                    title += 'Probcoll, H: {0}'.format(
+                    title += 'collision, H: {0}'.format(
                         params['policy']['H']
                     )
                 else:
@@ -2719,13 +2719,13 @@ def plot_design_decisions(FILE_NAME, all_exps):
 
                 if params['policy']['class'] == 'RCcarMACPolicy':
                     title += ', {0}, {1}'.format(
-                        'classification' if params['policy']['RCcarMACPolicy']['is_classification'] else 'regression',
-                        'strictly increasing' if params['policy']['RCcarMACPolicy']['probcoll_strictly_increasing'] else 'not strictly increasing'
+                        'CE' if params['policy']['RCcarMACPolicy']['is_classification'] else 'MSE',
+                        'increasing' if params['policy']['RCcarMACPolicy']['probcoll_strictly_increasing'] else 'not increasing'
                     )
 
                 title += ',\n{0}, {1}'.format(
                     'uniform replay' if params['alg']['replay_pool_sampling'] == 'uniform' else 'prioritized replay',
-                    'clip cost' if params['policy']['clip_cost_target_with_dones'] else "don't clip cost"
+                    'clip labels' if params['policy']['clip_cost_target_with_dones'] else "extend labels"
                 )
 
                 fontsize = 8
@@ -2739,15 +2739,23 @@ def plot_design_decisions(FILE_NAME, all_exps):
         ax.set_yticklabels([''] * len(ax.get_yticklabels()))
         ax.yaxis.set_ticks_position('both')
 
-    for ax in axes_cumreward[:, 0]:
+    for i, ax in enumerate(axes_cumreward[:, 0]):
         ax.set_yticklabels(['', '250', '500', '750', '1000', ''])
         ax.set_ylabel('Distance (m)', fontdict=font)
+        textfont = copy.deepcopy(font)
+        textfont['weight'] = 'bold'
+        ax.text(-0.4, 0.5, '{0}'.format(chr(ord('A') + i)), ha='center', fontdict=textfont, transform=ax.transAxes)
 
     for ax in axes_cumreward[:, -1]:
         ax.yaxis.tick_right()
         ax.set_yticklabels(['', '3', '6', '9', '12', ''])
         ax.set_ylabel('Hallway lengths', fontdict=font)
         ax.yaxis.set_label_position("right")
+
+    for i, ax in enumerate(axes_cumreward[0, :]):
+        textfont = copy.deepcopy(font)
+        textfont['weight'] = 'bold'
+        ax.text(0.5, 1.3, '{0}'.format(i), ha='center', fontdict=textfont, transform=ax.transAxes)
 
     f_cumreward.text(0.5, -0.04, 'Time (hours)', ha='center', fontdict=font)
 
@@ -3241,7 +3249,7 @@ def plot_cluttered_hallway_lifelong_standalone_release():
                                  clear_obs=True,
                                  create_new_envs=False,
                                  load_train_rollouts=False,
-                                 load_eval_rollouts=False) for name in ('dql', 'nstep_dql', 'probcoll')]
+                                 load_eval_rollouts=False) for name in ('dql', 'nstep_dql', 'ours')]
     all_exps = [[exps] for exps in all_exps]
 
     titles = ['Double\nQ-learning', '5-step Double\nQ-learning', 'Our\napproach']
@@ -3301,7 +3309,7 @@ def plot_cluttered_hallway_lifelong_standalone_release():
 # plot_empty_hallway_lifelong()
 # plot_cluttered_hallway_reset()
 # plot_cluttered_hallway_lifelong()
-#
+
 # plot_priority_replay_empty_hallway_reset()
 # plot_priority_replay_empty_hallway_lifelong()
 # plot_priority_replay_cluttered_hallway_reset()
