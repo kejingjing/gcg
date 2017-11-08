@@ -168,6 +168,19 @@ policy:
     output_dim: 2
     action_value_fn: 'prob_heading' # prob_heading / prob_plus_heading
     action_value_alpha: [1.0, 1.0]
+    
+    input_sensors:
+      - ori:
+        dim: 1
+        pos: 0
+        use: "add"
+        output_pos: 1 # Only needed if add
+        
+      - goal_ori:
+        dim: 1
+        pos: 1
+        use: "goal"
+
     output_sensors:
       - probcoll:
         dim: 1
@@ -181,12 +194,14 @@ policy:
       - orientation:
         dim: 1
         pos: 1 # position in output
-        fn: 'sigmoid'
-        scale: 6.283185307179586 # 2pi  
-        loss: 'xentropy'
+        fn: 
+        scale: 1.0
+#        scale: 6.283185307179586 # 2pi  
+        loss: 'mse'
         goal: 'obs_vec'
         goal_pos: 0 # position in obs_vec
         clip_with_done: True
+        cum_sum: 'post'
   # preprocessing
   preprocess: # whiten observations / actions / rewards
     observations_im_mean: True

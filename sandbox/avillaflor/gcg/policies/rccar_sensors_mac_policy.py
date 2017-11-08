@@ -19,9 +19,9 @@ class RCcarSensorsMACPolicy(MACPolicy, Serializable):
         #TODO
         self._output_dim = kwargs['output_dim']
         self._output_sensors = kwargs['output_sensors'] 
+        self._input_sensors = kwargs['input_sensors']
         self._action_value_fn = kwargs['action_value_fn']
         self._action_value_alpha = kwargs['action_value_alpha']
-#        self._is_classification = kwargs['is_classification']
         MACPolicy.__init__(self, **kwargs)
 
         assert(self._H == self._N)
@@ -63,6 +63,65 @@ class RCcarSensorsMACPolicy(MACPolicy, Serializable):
 
         return tf_obs_im_ph, tf_obs_vec_ph, tf_actions_ph, tf_dones_ph, tf_rewards_ph, tf_obs_im_target_ph, tf_obs_vec_target_ph, tf_test_es_ph_dict, tf_episode_timesteps_ph
 
+
+    def _graph_extract_from_obs_vec_ph(self, tf_obs_vec_ph, tf_obs_vec_target_ph):
+        # TODO Might not be handling target stuff correctly
+        # TODO Check again when doing value function stuff
+        tf_obs_vec =[]
+        tf_obs_vec_target = []
+        tf_final_add = []
+        tf_final_add_target = []
+        tf_goal_vec = []
+        final_add_pos = 0
+        batch_size = tf.shape(tf_obs_vec_ph)[0]
+        for sensor in self._input_sensors:
+            use = sensor['use']
+            pos = sensor['pos']
+            dim = sensor['dim']
+            data = tf_obs_vec_ph[:, :, pos:pos+dim]
+            data_target = tf_obs_vec_target_ph[:, :, pos:pos+dim]
+            if use == 'input':
+                tf_obs_vec.append(data)
+                tf_obs_vec_target.append(data_target)
+            elif use == 'add':
+                output_pos = sensor['output_pos']
+                data = data[:, -1, :]
+                data_target = data_target[:, -1, :]
+                if output_pos != final_add_pos:
+                    zero_add = tf.zeros((batch_size, output_pos - final_add_pos))
+                    tf_final_add.append(zero_add)
+                    tf_final_add_target.append(zero_add)
+                tf_final_add.append(data)
+                tf_final_add_target.append(data_target)
+                final_add_pos = output_pos + dim
+            elif use == 'goal':
+                # TODO consider changing goals
+                tf_goal_vec.append(data[:, -1, :])
+            else:
+                raise NotImplementedError
+
+        if final_add_pos != self._output_dim:
+            zero_add = tf.zeros((tf.shape(tf_obs_vec_ph)[0], self._output_dim - final_add_pos))
+            tf_final_add.append(zero_add)
+            tf_final_add_target.append(zero_add)
+
+        if len(tf_obs_vec) == 0:
+            # TODO
+            # TODO issue with this being dim 0
+            tf_obs_vec = tf.zeros((batch_size, 0))
+        else:
+            tf_obs_vec = tf.concat(tf_obs_vec, axis=2)
+        if len(tf_obs_vec_target) == 0:
+            # TODO
+            tf_obs_vec_target = tf.zeros((batch_size, 0))
+        else:
+            tf_obs_vec_target = tf.concat(tf_obs_vec_target, axis=2)
+        tf_final_add = tf.concat(tf_final_add, axis=1)
+        tf_final_add_target = tf.concat(tf_final_add_target, axis=1)
+        tf_goal_vec = tf.concat(tf_goal_vec, axis=1)
+
+        return tf_obs_vec, tf_obs_vec_target, tf_final_add, tf_final_add_target, tf_goal_vec
+    
     def _graph_preprocess_placeholders(self):
         tf_preprocess = dict()
 
@@ -95,7 +154,7 @@ class RCcarSensorsMACPolicy(MACPolicy, Serializable):
 
         return tf_preprocess
 
-    def _graph_obs_to_lowd(self, tf_obs_im_ph, tf_obs_vec_ph, tf_preprocess, is_training):
+    def _graph_obs_to_lowd(self, tf_obs_im_ph, tf_obs_vec, tf_preprocess, is_training):
         import tensorflow.contrib.layers as layers
 
         with tf.name_scope('obs_to_lowd'):
@@ -122,13 +181,16 @@ class RCcarSensorsMACPolicy(MACPolicy, Serializable):
                 layer = layers.flatten(tf_obs_im_whitened)
 
             ### obs --> internal state
-            fc_input = tf.concat([layer, layers.flatten(tf_obs_vec_ph)], axis=1)
+            if tf_obs_vec.get_shape()[1].value == 0:
+                fc_input = layer
+            else:
+                fc_input = tf.concat([layer, layers.flatten(tf_obs_vec)], axis=1)
             tf_obs_lowd, _ = networks.fcnn(fc_input, self._observation_graph, is_training=is_training,
                                            scope='obs_to_lowd_fcnn', global_step_tensor=self.global_step)
 
         return tf_obs_lowd
 
-    def _graph_inference(self, tf_obs_lowd, tf_actions_ph, values_softmax, tf_preprocess, is_training, num_dp=1):
+    def _graph_inference(self, tf_obs_lowd, tf_final_add, tf_actions_ph, values_softmax, tf_preprocess, is_training, num_dp=1):
         """
         :param tf_obs_lowd: [batch_size, self._rnn_state_dim]
         :param tf_actions_ph: [batch_size, H, action_dim]
@@ -167,19 +229,37 @@ class RCcarSensorsMACPolicy(MACPolicy, Serializable):
             dim = entry['dim']
             pos = entry['pos']
             scale = entry['scale']
-            fn = entry['fn']
-            if fn == 'None':
+            fn = entry.get('fn', None)
+            cum_sum = entry.get('cum_sum', None)
+            if fn is None:
                 activation = tf.identity
             elif fn == 'sigmoid':
                 activation = tf.nn.sigmoid
+            elif fn == 'tanh':
+                activation = tf.nn.tanh
             else:
                 raise NotImplementedError
-            
-            specific_vals = tf_pre_values[:, :, pos:pos+dim]
-            output_vals = activation(specific_vals) * scale
+           
+            if cum_sum == 'pre':
+                specific_vals = tf_pre_values[:, :, pos:pos+dim]
+                specific_vals = tf.cumsum(specific_vals, axis=1)
+                output_vals = activation(specific_vals) * scale
+            elif cum_sum == 'post':
+                specific_vals = tf_pre_values[:, :, pos:pos+dim]
+                output_vals = activation(specific_vals) * scale
+                output_vals = tf.cumsum(output_vals, axis=1)
+            elif cum_sum is None:
+                specific_vals = tf_pre_values[:, :, pos:pos+dim]
+                output_vals = activation(specific_vals) * scale
+            else:
+                raise NotImplementedError
             tf_values.append(activation(output_vals))
 
         tf_values = tf.concat(tf_values, axis=2)
+
+        tf_final_add = tf.expand_dims(tf_final_add, axis=1)
+
+        tf_values = tf_values + tf_final_add
 
         if values_softmax['type'] == 'final':
             tf_values_softmax = tf.zeros([batch_size, N])
@@ -198,12 +278,15 @@ class RCcarSensorsMACPolicy(MACPolicy, Serializable):
 
         return tf_values, tf_values_softmax, None, None
 
-    def _graph_get_action(self, tf_obs_im_ph, tf_obs_vec_ph, get_action_params, scope_select, reuse_select, scope_eval, reuse_eval,
-                          tf_episode_timesteps_ph, add_speed_cost):
+    def _graph_get_action(self, tf_obs_im_ph, tf_obs_vec, tf_final_add, tf_goal_vec, 
+                          get_action_params, scope_select, reuse_select, scope_eval, reuse_eval,
+                          tf_episode_timesteps_ph):
         """
         :param tf_obs_im_ph: [batch_size, obs_history_len, obs_im_dim]
-        :param tf_obs_vec_ph: [batch_size, obs_history_len, obs_vec_dim]
-        aparam get_action_params: how to select actions
+        :param tf_obs_vec: [batch_size, obs_history_len, obs_vec_dim]
+        :param tf_final_add: [batch_size, output_dim]
+        :param tf_goal_vec: [batch_size, goal_dim]
+        :param get_action_params: how to select actions
         :param scope_select: which scope to evaluate values (double Q-learning)
         :param scope_eval: which scope to select values (double Q-learning)
         :return: tf_get_action [batch_size, action_dim], tf_get_action_value [batch_size]
@@ -211,34 +294,32 @@ class RCcarSensorsMACPolicy(MACPolicy, Serializable):
         ### process to lowd
         with tf.variable_scope(scope_select, reuse=reuse_select):
             tf_preprocess_select = self._graph_preprocess_placeholders()
-            tf_obs_lowd_select = self._graph_obs_to_lowd(tf_obs_im_ph, tf_obs_vec_ph, tf_preprocess_select, is_training=False)
+            tf_obs_lowd_select = self._graph_obs_to_lowd(tf_obs_im_ph, tf_obs_vec, tf_preprocess_select, is_training=False)
         with tf.variable_scope(scope_eval, reuse=reuse_eval):
             tf_preprocess_eval = self._graph_preprocess_placeholders()
-            tf_obs_lowd_eval = self._graph_obs_to_lowd(tf_obs_im_ph, tf_obs_vec_ph, tf_preprocess_eval, is_training=False)
+            tf_obs_lowd_eval = self._graph_obs_to_lowd(tf_obs_im_ph, tf_obs_vec, tf_preprocess_eval, is_training=False)
 
         get_action_type = get_action_params['type']
         if get_action_type == 'random':
             tf_get_action, tf_get_value, tf_get_action_reset_ops = self._graph_get_action_random(
-                tf_obs_lowd_select, tf_obs_lowd_eval, tf_obs_vec_ph,
+                tf_obs_lowd_select, tf_obs_lowd_eval, tf_final_add, tf_goal_vec,
                 tf_preprocess_select, tf_preprocess_eval,
                 get_action_params, get_action_type,
                 scope_select, reuse_select,
-                scope_eval, reuse_eval,
-                add_speed_cost)
+                scope_eval, reuse_eval)
         elif get_action_type == 'cem':
             tf_get_action, tf_get_value, tf_get_action_reset_ops = self._graph_get_action_cem(
-                tf_obs_lowd_select, tf_obs_lowd_eval, tf_obs_vec_ph,
+                tf_obs_lowd_select, tf_obs_lowd_eval, tf_final_add, tf_goal_vec,
                 tf_preprocess_select, tf_preprocess_eval,
                 get_action_params, get_action_type, scope_select, reuse_select, scope_eval, reuse_eval,
-                tf_episode_timesteps_ph, add_speed_cost)
+                tf_episode_timesteps_ph)
         else:
             raise NotImplementedError
 
         return tf_get_action, tf_get_value, tf_get_action_reset_ops
 
-    def _graph_get_action_random(self, tf_obs_lowd_select, tf_obs_lowd_eval, tf_obs_vec_ph, tf_preprocess_select, tf_preprocess_eval,
-                                 get_action_params, get_action_type, scope_select, reuse_select, scope_eval, reuse_eval,
-                                 add_speed_cost):
+    def _graph_get_action_random(self, tf_obs_lowd_select, tf_obs_lowd_eval, tf_final_add, tf_goal_vec, tf_preprocess_select, tf_preprocess_eval,
+                                 get_action_params, get_action_type, scope_select, reuse_select, scope_eval, reuse_eval):
         H = get_action_params['H']
         assert (H <= self._N)
 
@@ -265,11 +346,11 @@ class RCcarSensorsMACPolicy(MACPolicy, Serializable):
         ### inference to get values
         with tf.variable_scope(scope_select, reuse=reuse_select):
             tf_values_all_select, tf_values_softmax_all_select, _, _ = \
-                self._graph_inference(tf_obs_lowd_repeat_select, tf_actions, get_action_params['values_softmax'],
+                self._graph_inference(tf_obs_lowd_repeat_select, tf_final_add, tf_actions, get_action_params['values_softmax'],
                                       tf_preprocess_select, is_training=False, num_dp=K)  # [num_obs*k, H]
         with tf.variable_scope(scope_eval, reuse=reuse_eval):
             tf_values_all_eval, tf_values_softmax_all_eval, _, _ = \
-                self._graph_inference(tf_obs_lowd_repeat_eval, tf_actions, get_action_params['values_softmax'],
+                self._graph_inference(tf_obs_lowd_repeat_eval, tf_final_add, tf_actions, get_action_params['values_softmax'],
                                       tf_preprocess_eval, is_training=False, num_dp=K)  # [num_obs*k, H]
 #        if self._is_classification:
 #            ### convert pre-activation to post-activation
@@ -278,16 +359,13 @@ class RCcarSensorsMACPolicy(MACPolicy, Serializable):
 #        else:
 
         # TODO
-        tf_values_all_select = self._get_action_value(tf_values_all_select, tf_obs_vec_ph)
-        tf_values_all_eval = self._get_action_value(tf_values_all_eval, tf_obs_vec_ph)
+        tf_values_all_select = self._get_action_value(tf_values_all_select, tf_goal_vec)
+        tf_values_all_eval = self._get_action_value(tf_values_all_eval, tf_goal_vec)
 #        tf_values_all_select = -tf_values_all_select
 #        tf_values_all_eval = -tf_values_all_eval
 
         ### get_action based on select (policy)
         tf_values_select = tf.reduce_sum(tf_values_all_select * tf_values_softmax_all_select, reduction_indices=(1,))  # [num_obs*K]
-#        if add_speed_cost:
-#            tf_values_select -= self._speed_weight * tf.reduce_mean(tf.square(tf_actions[:, :, 1] - max_speed),
-#                                                                    reduction_indices=1)
         tf_values_select = tf.reshape(tf_values_select, (num_obs, K))  # [num_obs, K]
         tf_values_argmax_select = tf.one_hot(tf.argmax(tf_values_select, 1), depth=K)  # [num_obs, K]
         tf_get_action = tf.reduce_sum(
@@ -296,9 +374,6 @@ class RCcarSensorsMACPolicy(MACPolicy, Serializable):
             reduction_indices=1)  # [num_obs, action_dim]
         ### get_action_value based on eval (target)
         tf_values_eval = tf.reduce_sum(tf_values_all_eval * tf_values_softmax_all_eval, reduction_indices=(1,))  # [num_obs*K]
-#        if add_speed_cost:
-#            tf_values_eval -= self._speed_weight * tf.reduce_mean(tf.square(tf_actions[:, :, 1] - max_speed),
-#                                                                    reduction_indices=1)
         tf_values_eval = tf.reshape(tf_values_eval, (num_obs, K))  # [num_obs, K]
         tf_get_action_value = tf.reduce_sum(tf_values_argmax_select * tf_values_eval, reduction_indices=1)
         tf_get_action_reset_ops = []
@@ -310,9 +385,10 @@ class RCcarSensorsMACPolicy(MACPolicy, Serializable):
 
         return tf_get_action, tf_get_action_value, tf_get_action_reset_ops
 
-    def _graph_get_action_cem(self, tf_obs_lowd_select, tf_obs_lowd_eval, tf_obs_vec_ph, tf_preprocess_select, tf_preprocess_eval,
+    def _graph_get_action_cem(self, tf_obs_lowd_select, tf_obs_lowd_eval, tf_final_add, tf_goal_vec, tf_preprocess_select, tf_preprocess_eval,
                               get_action_params, get_action_type, scope_select, reuse_select, scope_eval, reuse_eval,
-                              tf_episode_timesteps_ph, add_speed_cost):
+                              tf_episode_timesteps_ph):
+        # TODO update to include the goals and final_add
         H = get_action_params['H']
         assert (H <= self._N)
 
@@ -341,7 +417,7 @@ class RCcarSensorsMACPolicy(MACPolicy, Serializable):
                 ### eval current distribution costs
                 with tf.variable_scope(scope_select, reuse=reuse_select):
                     tf_values_all_select, tf_values_softmax_all_select, _, _ = \
-                        self._graph_inference(tf_obs_lowd_repeat_select, tf_actions,
+                        self._graph_inference(tf_obs_lowd_repeat_select, tf_final_add, tf_actions,
                                               get_action_params['values_softmax'],
                                               tf_preprocess_select, is_training=False, num_dp=M)  # [num_obs*k, H]
 
@@ -352,10 +428,6 @@ class RCcarSensorsMACPolicy(MACPolicy, Serializable):
 
                 tf_values_select = tf.reduce_sum(tf_values_all_select * tf_values_softmax_all_select,
                                                  reduction_indices=1)  # [num_obs*K] # TODO: if variable speed, need to multiple by kinetic energy
-#                if add_speed_cost:
-#                    max_speed = self._env_spec.action_space.high[1]
-#                    tf_values_select -= self._speed_weight * tf.reduce_mean(tf.square(tf_actions[:, :, 1] - max_speed),
-#                                                                            reduction_indices=1)
 
                 ### get top k
                 _, top_indices = tf.nn.top_k(tf_values_select, k=K)
@@ -406,7 +478,7 @@ class RCcarSensorsMACPolicy(MACPolicy, Serializable):
             with tf.variable_scope(scope_eval, reuse=reuse_eval):
                 tf_actions = tf.expand_dims(tf_get_action_seq, 0)
                 tf_values_all_eval, tf_values_softmax_all_eval, _, _ = \
-                    self._graph_inference(tf_obs_lowd_eval, tf_actions, get_action_params['values_softmax'],
+                    self._graph_inference(tf_obs_lowd_eval, tf_final_add, tf_actions, get_action_params['values_softmax'],
                                           tf_preprocess_eval, is_training=False)  # [num_obs*k, H]
 
 #                if self._is_classification:
@@ -416,21 +488,16 @@ class RCcarSensorsMACPolicy(MACPolicy, Serializable):
 
                 tf_values_eval = tf.reduce_sum(tf_values_all_eval * tf_values_softmax_all_eval,
                                                reduction_indices=1)  # [num_obs*K] # TODO: if variable speed, need to multiple by kinetic energy
-#                if add_speed_cost:
-#                    max_speed = self._env_spec.action_space.high[1]
-#                    tf_values_eval -= self._speed_weight * tf.reduce_mean(tf.square(tf_actions[:, :, 1] - max_speed),
-#                                                                          reduction_indices=1)
-
                 tf_get_action_value = tf_values_eval
 
             return tf_get_action, tf_get_action_value, tf_get_action_reset_ops
 
-    def _get_action_value(self, tf_graph_output_values, tf_obs_vec_ph):
+    def _get_action_value(self, tf_graph_output_values, tf_goal_vec):
         if self._action_value_fn == 'prob_heading':
-            return (1. - tf_graph_output_values[:, :, 0]) * ((tf.cos(tf_graph_output_values[:, :, 1] - tf_obs_vec_ph[:, -1, 1]) + 1.) / 2.)
+            return (1. - tf_graph_output_values[:, :, 0]) * ((tf.cos(tf_graph_output_values[:, :, 1] - tf_goal_vec[:, 0]) + 1.) / 2.)
         elif self._action_value_fn == 'prob_plus_heading':
             # TODO
-            return - self._action_value_alpha[0] * tf_graph_output_values[:, :, 0] + self._action_value_alpha[1] * ((tf.cos(tf_graph_output_values[:, :, 1] - tf_obs_vec_ph[:, -1, 1]) + 1.) / 2.)
+            return - self._action_value_alpha[0] * tf_graph_output_values[:, :, 0] + self._action_value_alpha[1] * ((tf.cos(tf_graph_output_values[:, :, 1] - tf_goal_vec[:, 0]) + 1.) / 2.)
         else:
             raise NotImplementedError
 
@@ -537,8 +604,6 @@ class RCcarSensorsMACPolicy(MACPolicy, Serializable):
     def _graph_sub_gt_cost(self, tf_train_values, tf_labels, loss, scale):
         #TODO
         control_dependencies = []
-#        control_dependencies += [tf.assert_greater_equal(tf_labels, 0., name='cost_assert_2')]
-#        control_dependencies += [tf.assert_less_equal(tf_labels, 1., name='cost_assert_3')]
         if loss == 'mse':
             cost = tf.reduce_sum(tf.square(tf_train_values - tf_labels), axis=2, keep_dims=True) 
         elif loss == 'xentropy':
@@ -549,6 +614,8 @@ class RCcarSensorsMACPolicy(MACPolicy, Serializable):
             control_dependencies += [tf.assert_greater_equal(tf_train_values, 0., name='cost_assert_4')]
             control_dependencies += [tf.assert_less_equal(tf_train_values, 1., name='cost_assert_5')]
             cost = tf_utils.xentropy(tf_train_values, tf_labels)
+        elif loss == 'sin_2':
+            cost = tf.reduce_sum(tf.square(tf.sin(tf_train_values - tf_labels)), axis=2, keep_dims=True)
         else:
             raise NotImplementedError
         return cost, control_dependencies
@@ -592,16 +659,19 @@ class RCcarSensorsMACPolicy(MACPolicy, Serializable):
             with tf.variable_scope(policy_scope):
                 ### create preprocess placeholders
                 tf_preprocess = self._graph_preprocess_placeholders()
+
+                tf_obs_vec, tf_obs_vec_target, tf_final_add, tf_final_add_target, tf_goal_vec = self._graph_extract_from_obs_vec_ph(tf_obs_vec_ph, tf_obs_vec_target_ph)
+
                 ### process obs to lowd
-                tf_obs_lowd = self._graph_obs_to_lowd(tf_obs_im_ph, tf_obs_vec_ph, tf_preprocess, is_training=True)
+                tf_obs_lowd = self._graph_obs_to_lowd(tf_obs_im_ph, tf_obs_vec, tf_preprocess, is_training=True)
                 ### create training policy
                 tf_train_values, tf_train_values_softmax, _, _ = \
-                    self._graph_inference(tf_obs_lowd, tf_actions_ph[:, :self._H, :],
+                    self._graph_inference(tf_obs_lowd, tf_final_add, tf_actions_ph[:, :self._H, :],
                                           self._values_softmax, tf_preprocess, is_training=True)
 
             with tf.variable_scope(policy_scope, reuse=True):
                 tf_train_values_test, tf_train_values_softmax_test, _, _ = \
-                    self._graph_inference(tf_obs_lowd, tf_actions_ph[:, :self._get_action_test['H'], :],
+                    self._graph_inference(tf_obs_lowd, tf_final_add, tf_actions_ph[:, :self._get_action_test['H'], :],
                                           self._values_softmax, tf_preprocess, is_training=False)
                 # tf_get_value = tf.reduce_sum(tf_train_values_softmax_test * tf_train_values_test, reduction_indices=1)
 #                tf_get_value = -tf.sigmoid(tf_train_values_test) if self._is_classification else -tf_train_values_test
@@ -610,9 +680,8 @@ class RCcarSensorsMACPolicy(MACPolicy, Serializable):
 
             ### action selection
             tf_get_action, tf_get_action_value, tf_get_action_reset_ops = \
-                self._graph_get_action(tf_obs_im_ph, tf_obs_vec_ph, self._get_action_test,
-                                       policy_scope, True, policy_scope, True,
-                                       add_speed_cost=True,
+                self._graph_get_action(tf_obs_im_ph, tf_obs_vec, tf_final_add, tf_goal_vec,
+                                       self._get_action_test, policy_scope, True, policy_scope, True,
                                        tf_episode_timesteps_ph=tf_episode_timesteps_ph)
             ### exploration strategy and logprob
             tf_get_action_explore = self._graph_get_action_explore(tf_get_action, tf_test_es_ph_dict)
@@ -623,6 +692,7 @@ class RCcarSensorsMACPolicy(MACPolicy, Serializable):
             tf_trainable_policy_vars = sorted(tf.get_collection(xplatform.trainable_variables_collection_name(),
                                                                 scope=policy_scope), key=lambda v: v.name)
 
+            # TODO come back to target stuff later
             ### create target network
             if self._use_target:
                 target_scope = 'target' if self._separate_target_params else 'policy'
@@ -637,8 +707,7 @@ class RCcarSensorsMACPolicy(MACPolicy, Serializable):
                                                                                               reuse_select=True,
                                                                                               scope_eval=target_scope,
                                                                                               reuse_eval=(target_scope == policy_scope),
-                                                                                              tf_episode_timesteps_ph=None, # TODO: would need to fill in
-                                                                                              add_speed_cost=False)
+                                                                                              tf_episode_timesteps_ph=None,) # TODO: would need to fill in
 
                 tf_target_get_action_values = tf.transpose(tf.reshape(tf_target_get_action_values, (self._N + 1, -1)))[:, 1:]
             else:
@@ -671,6 +740,7 @@ class RCcarSensorsMACPolicy(MACPolicy, Serializable):
             ### initialize
             self._graph_init_vars(tf_sess)
 
+        # TODO
         ### what to return
         return {
             'sess': tf_sess,
