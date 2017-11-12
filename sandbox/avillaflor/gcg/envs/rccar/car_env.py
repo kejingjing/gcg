@@ -31,7 +31,7 @@ class CarEnv(DirectObject):
         self._do_back_up = self._params.get('do_back_up', False)
         self._use_depth = self._params.get('use_depth', False)
         self._use_back_cam = self._params.get('use_back_cam', False)
-        self._collision_reward = self._params.get('collision_reward', 0.)
+        self._collision_reward = self._params.get('collision_reward', -1.0 * self.max_reward * self.horizon)
         if not self._params.get('visualize', False):
             loadPrcFileData('', 'window-type offscreen')
 

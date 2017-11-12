@@ -4,15 +4,45 @@ import yaml
 
 from rllab import config
 from sandbox.avillaflor.gcg.algos.gcg import run_gcg
-from rllab.misc.instrument import stub, run_experiment_lite
+from rllab.misc.instrument import stub, run_experiment_lite, VariantGenerator
+
+import multiprocessing
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--exps', nargs='+')
 parser.add_argument('-mode', type=str, default='local')
 parser.add_argument('--confirm_remote', action='store_false')
 parser.add_argument('--dry', action='store_true')
+parser.add_argument('--gpus', type=list, default=[])
 parser.add_argument('-region', type=str, choices=('us-west-1', 'us-west-2', 'us-east-1', 'us-east-2'), default='us-west-1')
 args = parser.parse_args()
+
+
+# TODO instead use process per open gpu and then queue of parameters
+def thread_fn(exp_params, gpus, sem, lock):
+    sem.acquire()
+    lock.acquire()
+    for gpu in gpus:
+        if gpu[1] > 0:
+            exp_params['policy']['gpu_device'] = gpu[0]
+            gpu[1] -= 1
+    lock.release()
+    config.USE_TF = True
+    run_experiment_lite(
+        run_gcg,
+        snapshot_mode="all",
+        exp_name=exp_params['exp_name'],
+        exp_prefix=exp_params['exp_prefix'],
+        variant=exp_params,
+        use_gpu=True,
+        use_cloudpickle=True,
+    )
+    lock.acquire()
+    for gpu in gpus:
+        if gpu[0] == exp_params['policy']['gpu_device']:
+            gpu[1] += 1
+    lock.release()
+    sem.release()
 
 for exp in args.exps:
     yaml_path = os.path.abspath('yamls/{0}.yaml'.format(exp))
@@ -23,15 +53,45 @@ for exp in args.exps:
         params_txt = ''.join(f.readlines())
     params['txt'] = params_txt
 
-    os.environ["CUDA_VISIBLE_DEVICES"] = str(params['policy']['gpu_device'])
-    config.USE_TF = True
+    num_per_gpu = int(1.0 / params['policy']['gpu_frac'])
+    gpus = []
+    for i in args.gpus:
+        gpus.append([i, num_per_gpu])
+    
+    # for multiprocessing
+    sem = multiprocessing.Semaphore(len(gpus) * num_per_gpu)
+    lock = multiprocessing.Lock()
+    processes = []
 
-    run_experiment_lite(
-        run_gcg,
-        snapshot_mode="all",
-        exp_name=params['exp_name'],
-        exp_prefix=params['exp_prefix'],
-        variant=params,
-        use_gpu=True,
-        use_cloudpickle=True,
-    )
+    vg = VariantGenerator()
+    vg.add('fn', ['tanh', None])
+    vg.add('scale', lambda fn: [3.14159265 if fn == 'tanh' else 1.0])
+    vg.add('cum_sum', ['post', None])
+    vg.add('loss', ['mse', 'sin_2'])
+    variants = vg.variants()
+    for seed in [0, 1, 2]:
+        for variant in variants:
+            exp_params = {**params}
+            exp_params['policy']['RCcarSensorsMACPolicy']['output_sensors'][1].update(variant)
+#            exp_params = {**params, **variant}
+            exp_params['exp_prefix'] ='{0}_{1}'.format(vg.to_name_suffix(variant), exp_params['exp_prefix'])
+            exp_params['seed'] = seed
+            p = multiprocessing.Process(target=thread_fn, args=(exp_params, gpus, sem, lock))
+            p.start()
+            processes.append(p)
+#        import IPython; IPython.embed()
+    # TODO
+#    os.environ["CUDA_VISIBLE_DEVICES"] = str(params['policy']['gpu_device'])
+#        config.USE_TF = True
+#
+#        run_experiment_lite(
+#            run_gcg,
+#            snapshot_mode="all",
+#            exp_name=exp_params['exp_name'],
+#            exp_prefix=exp_params['exp_prefix'],
+#            variant=exp_params,
+#            use_gpu=True,
+#            use_cloudpickle=True,
+#        )
+    for p in processes:
+        p.join()

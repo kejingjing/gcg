@@ -47,15 +47,21 @@ class RoomClutteredEnv(SquareEnv):
         return im, vec
 
     def _get_reward(self):
+        if self._collision_reward_only:
+            if self._collision:
+                reward = -1.0
+            else:
+                reward = 0
+        else:
+            reward = self._real_reward()
+        return reward
+        
+    def _real_reward(self):
         if self._collision:
             reward = self._collision_reward
         else:
-            if self._collision_reward_only:
-                reward = 0
-            else:
-#                if self._get_heading() > pi or self._goal_heading[0] > pi:
-#                    import IPython; IPython.embed()
-                reward = np.cos(self._goal_heading[0] - self._get_heading())  
+            reward = (np.cos(self._goal_heading[0] - self._get_heading()) + 1.) / 2.
+        assert(reward <= self.max_reward)
         return reward
 
     def _default_restart_pos(self):
@@ -88,7 +94,11 @@ class RoomClutteredEnv(SquareEnv):
 
     @property
     def horizon(self):
-        return 80
+        return 100
+
+    @property
+    def max_reward(self):
+        return 1.0
 
     # TODO
     def reset(self):
@@ -109,6 +119,7 @@ class RoomClutteredEnv(SquareEnv):
         info['vel'] = self._get_speed()
         info['goal_h'] =  self._goal_heading
         info['coll'] = self._collision
+        info['reward'] = self._real_reward() 
         return info
 
 if __name__ == '__main__':

@@ -437,13 +437,22 @@ class RNNCriticReplayPool():
         rewards = self._rewards[indices]
         est_values = self._est_values[indices]
         values = self._values[indices]
+        if self._save_env_infos:
+            env_infos = self._env_infos[indices] 
+            rewards = [info['reward'] for info in env_infos]
+            self._log_stats['AvgCollision'].append(env_infos[-1]['coll'])
+        else:
+            rewards = self._rewards[indices]
+            self._log_stats['AvgCollision'].append(int(rewards[-1] < 0.))
+        
         self._log_stats['FinalReward'].append(rewards[-1])
         self._log_stats['AvgReward'].append(np.mean(rewards))
         self._log_stats['CumReward'].append(np.sum(rewards))
         self._log_stats['EpisodeLength'].append(len(rewards))
-        self._log_stats['EstValuesAvgDiff'].append(np.mean(est_values - values))
-        self._log_stats['EstValuesMaxDiff'].append(np.max(est_values - values))
-        self._log_stats['EstValuesMinDiff'].append(np.min(est_values - values))
+        # TODO
+#        self._log_stats['EstValuesAvgDiff'].append(np.mean(est_values - values))
+#        self._log_stats['EstValuesMaxDiff'].append(np.max(est_values - values))
+#        self._log_stats['EstValuesMinDiff'].append(np.min(est_values - values))
 
         ## update paths
         if self._save_rollouts:
@@ -491,12 +500,14 @@ class RNNCriticReplayPool():
         logger.record_tabular(prefix+'FinalRewardStd', np.std(log_stats['FinalReward']))
         logger.record_tabular(prefix+'EpisodeLengthMean', np.mean(log_stats['EpisodeLength']))
         logger.record_tabular(prefix+'EpisodeLengthStd', np.std(log_stats['EpisodeLength']))
-        logger.record_tabular(prefix+'EstValuesAvgDiffMean', np.mean(log_stats['EstValuesAvgDiff']))
-        logger.record_tabular(prefix+'EstValuesAvgDiffStd', np.std(log_stats['EstValuesAvgDiff']))
-        logger.record_tabular(prefix+'EstValuesMaxDiffMean', np.mean(log_stats['EstValuesMaxDiff']))
-        logger.record_tabular(prefix+'EstValuesMaxDiffStd', np.std(log_stats['EstValuesMaxDiff']))
-        logger.record_tabular(prefix+'EstValuesMinDiffMean', np.mean(log_stats['EstValuesMinDiff']))
-        logger.record_tabular(prefix+'EstValuesMinDiffStd', np.std(log_stats['EstValuesMinDiff']))
+        # TODO
+        logger.record_tabular(prefix+'AvgCollision', np.mean(log_stats['AvgCollision']))
+#        logger.record_tabular(prefix+'EstValuesAvgDiffMean', np.mean(log_stats['EstValuesAvgDiff']))
+#        logger.record_tabular(prefix+'EstValuesAvgDiffStd', np.std(log_stats['EstValuesAvgDiff']))
+#        logger.record_tabular(prefix+'EstValuesMaxDiffMean', np.mean(log_stats['EstValuesMaxDiff']))
+#        logger.record_tabular(prefix+'EstValuesMaxDiffStd', np.std(log_stats['EstValuesMaxDiff']))
+#        logger.record_tabular(prefix+'EstValuesMinDiffMean', np.mean(log_stats['EstValuesMinDiff']))
+#        logger.record_tabular(prefix+'EstValuesMinDiffStd', np.std(log_stats['EstValuesMinDiff']))
         logger.record_tabular(prefix+'NumEpisodes', len(log_stats['EpisodeLength']))
         logger.record_tabular(prefix+'Time', np.mean(log_stats['Time']))
 

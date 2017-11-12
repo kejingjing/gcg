@@ -223,12 +223,11 @@ class RCcarSensorsMACPolicy(MACPolicy, Serializable):
         tf_values = []
 
         for sensor in self._output_sensors:
-#            entry = self._output_sensors[sensor]
             #TODO
             entry = sensor
             dim = entry['dim']
             pos = entry['pos']
-            scale = entry['scale']
+            scale = entry.get('scale', 1.0)
             fn = entry.get('fn', None)
             cum_sum = entry.get('cum_sum', None)
             if fn is None:
@@ -536,11 +535,11 @@ class RCcarSensorsMACPolicy(MACPolicy, Serializable):
         for sensor in self._output_sensors:
             # TODO
             entry = sensor
-#            entry = self._output_sensors[sensor]
             dim = entry['dim']
             goal_pos = entry['goal_pos']
             goal_type = entry['goal']
-            clip_with_done = entry['clip_with_done']
+            clip_with_done = entry.get('clip_with_done', True)
+            name = entry['name']
             if clip_with_done:
                 mask = clip_mask
             else:
@@ -551,8 +550,8 @@ class RCcarSensorsMACPolicy(MACPolicy, Serializable):
             elif goal_type == 'obs_vec':
                 goal = tf_obs_vec_target_ph[:, -self._H:, goal_pos:goal_pos+dim] 
             pos = entry['pos']
-            loss = entry['loss']
-            scale = entry['scale']
+            loss = entry.get('loss', 'mse')
+            scale = entry.get('scale', 1.)
 #            if sensor == 'probcoll':
             if pos == 0:
 #                specific_rew = tf.slice(tf_rewards_ph, [0, goal_pos], [tf.shape(tf_rewards_ph)[0], dim])
@@ -568,7 +567,8 @@ class RCcarSensorsMACPolicy(MACPolicy, Serializable):
                 ### desired values
                 # assert(not self._use_target)
                 coll_cost, coll_dep = self._graph_sub_gt_cost(specific_vals, tf_labels, loss, scale)
-                costs.append(coll_cost * mask)
+                cost = tf.reduce_sum(coll_cost * mask)
+                costs.append(cost)
                 control_dependencies += coll_dep
             else:
                 # TODO
@@ -576,7 +576,8 @@ class RCcarSensorsMACPolicy(MACPolicy, Serializable):
 #                specific_vals = tf.slice(tf_train_values, [0, 0, pos], [tf.shape(tf_train_values)[0], tf.shape(tf_train_values)[1], dim])
                 tf_labels = goal
                 coll_cost, coll_dep = self._graph_sub_gt_cost(specific_vals, tf_labels, loss, scale)
-                costs.append(coll_cost * mask)
+                cost = tf.reduce_sum(coll_cost * mask)
+                costs.append(cost)
                 control_dependencies += coll_dep
 #        if self._use_target:
 #            target_labels = tf.stop_gradient(-tf_target_get_action_values)
@@ -595,11 +596,12 @@ class RCcarSensorsMACPolicy(MACPolicy, Serializable):
 #                cost = tf.reduce_sum(mask * cross_entropies)
 #            else:
 #            mses = tf.square(tf_train_values - tf_labels)
-            mses = tf.reduce_sum(costs, axis=0)
-            cost = tf.reduce_sum(mses)
+#            mses = tf.reduce_sum(costs, axis=0)
+#            cost = tf.reduce_sum(mses)
+            cost = tf.reduce_sum(costs)
             weight_decay = self._weight_decay * tf.add_n(tf.get_collection(tf.GraphKeys.REGULARIZATION_LOSSES))
 
-        return cost + weight_decay, cost
+        return cost + weight_decay, cost, costs
 
     def _graph_sub_gt_cost(self, tf_train_values, tf_labels, loss, scale):
         #TODO
@@ -733,7 +735,7 @@ class RCcarSensorsMACPolicy(MACPolicy, Serializable):
             ### optimization
 #            tf_cost, tf_mse = self._graph_cost(tf_train_values, tf_train_values_softmax, tf_rewards_ph, tf_dones_ph,
 #                                               tf_obs_im_target_ph, tf_obs_vec_target_ph, tf_target_get_action_values)
-            tf_cost, tf_mse = self._graph_cost(tf_train_values, tf_rewards_ph, tf_dones_ph, tf_obs_im_target_ph,
+            tf_cost, tf_mse, tf_costs = self._graph_cost(tf_train_values, tf_rewards_ph, tf_dones_ph, tf_obs_im_target_ph,
                                                tf_obs_vec_target_ph, tf_target_get_action_values)
             tf_opt, tf_lr_ph = self._graph_optimize(tf_cost, tf_trainable_policy_vars)
 
@@ -763,6 +765,7 @@ class RCcarSensorsMACPolicy(MACPolicy, Serializable):
             'update_target_fn': tf_update_target_fn,
             'cost': tf_cost,
             'mse': tf_mse,
+            'costs': tf_costs,
             'opt': tf_opt,
             'lr_ph': tf_lr_ph,
             'policy_vars': tf_policy_vars,
@@ -873,12 +876,17 @@ class RCcarSensorsMACPolicy(MACPolicy, Serializable):
         if self._use_target:
             feed_dict[self._tf_dict['obs_im_target_ph']] = observations_im
         
-        cost, mse, _ = self._tf_dict['sess'].run([self._tf_dict['cost'],
-                                                  self._tf_dict['mse'],
-                                                  self._tf_dict['opt']],
-                                                 feed_dict=feed_dict)
+        cost, mse, costs, _ = self._tf_dict['sess'].run([self._tf_dict['cost'],
+                                                        self._tf_dict['mse'],
+                                                        self._tf_dict['costs'],
+                                                        self._tf_dict['opt']],
+                                                        feed_dict=feed_dict)
         assert(np.isfinite(cost))
 
         self._log_stats['Cost'].append(cost)
         self._log_stats['mse/cost'].append(mse / cost)
+        self._log_stats['reg cost'].append(cost - mse)
+        for i, sensor in enumerate(self._output_sensors):
+            self._log_stats['{0} cost'.format(sensor['name'])].append(costs[i])
+
 

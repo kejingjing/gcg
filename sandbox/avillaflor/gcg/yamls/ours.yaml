@@ -10,8 +10,8 @@ alg:
 
   ### Environment ###
 
-  env: "SimpleRoomClutteredEnv(params={'hfov': 120, 'do_back_up': False, 'collision_reward_only': True, 'collision_reward': -1, 'speed_limits': [2., 2.], 'visualize': False})"
-  env_eval: "SimpleRoomClutteredEnv(params={'hfov': 120, 'do_back_up': False, 'collision_reward': 0, 'speed_limits': [2., 2.], 'visualize': False})"
+  env: "SimpleRoomClutteredEnv(params={'hfov': 120, 'do_back_up': False, 'collision_reward_only': True, 'collision_reward': -1., 'speed_limits': [2., 2.], 'visualize': False})"
+  env_eval: "SimpleRoomClutteredEnv(params={'hfov': 120, 'do_back_up': False, 'collision_reward': -1., 'speed_limits': [2., 2.], 'visualize': False})"
 #  env: "CylinderEnv(params={'hfov': 120, 'do_back_up': False, 'collision_reward_only': True, 'collision_reward': -1, 'speed_limits': [2., 2.]})"
 #  env_eval: "CylinderEnv(params={'hfov': 120, 'do_back_up': False, 'collision_reward': 0, 'speed_limits': [2., 2.]})"
   normalize_env: False
@@ -183,6 +183,7 @@ policy:
 
     output_sensors:
       - probcoll:
+        name: 'probcoll'
         dim: 1
         pos: 0
         fn: 'sigmoid'
@@ -192,6 +193,7 @@ policy:
         goal_pos: 0
         clip_with_done: False
       - orientation:
+        name: 'ori'
         dim: 1
         pos: 1 # position in output
         fn: 
@@ -222,5 +224,5 @@ policy:
 
   # device
   gpu_device: 0
-  gpu_frac: 0.7
+  gpu_frac: 0.4
 
