@@ -75,28 +75,126 @@ class GCG(RLAlgorithm):
         assert (self._update_target_every_n_steps % self._sampler.n_envs == 0)
         assert (self._update_preprocess_every_n_steps % self._sampler.n_envs == 0)
 
-    ####################
-    ### Save methods ###
-    ####################
+    #############
+    ### Files ###
+    #############
 
-    def _save_rollouts_file(self, itr, rollouts, eval=False):
-        if eval:
-            fname = 'itr_{0}_rollouts_eval.pkl'.format(itr)
-        else:
-            fname = 'itr_{0}_rollouts.pkl'.format(itr)
-        fname = os.path.join(logger.get_snapshot_dir(), fname)
+    @property
+    def _save_dir(self):
+        return logger.get_snapshot_dir()
+
+    def _train_rollouts_file_name(self, itr):
+        return os.path.join(self._save_dir, 'itr_{0:04d}_train_rollouts.pkl'.format(itr))
+
+    def _eval_rollouts_file_name(self, itr):
+        return os.path.join(self._save_dir, 'itr_{0:04d}_eval_rollouts.pkl'.format(itr))
+
+    def _train_policy_file_name(self, itr):
+        return os.path.join(self._save_dir, 'itr_{0:04d}_train_policy.ckpt'.format(itr))
+
+    def _inference_policy_file_name(self, itr):
+        return os.path.join(self._save_dir, 'itr_{0:04d}_inference_policy.ckpt'.format(itr))
+
+    ############
+    ### Save ###
+    ############
+
+    def _save_train_rollouts(self, itr, rollouts):
+        fname = self._train_rollouts_file_name(itr)
         joblib.dump({'rollouts': rollouts}, fname, compress=3)
 
-    def _save_params(self, itr, train_rollouts, eval_rollouts):
-        with self._policy.session.as_default(), self._policy.session.graph.as_default():
-            itr_params = dict(
-                itr=itr,
-                policy=self._policy,
-            )
-            logger.save_itr_params(itr, itr_params)
+    def _save_eval_rollouts(self, itr, rollouts):
+        fname = self._eval_rollouts_file_name(itr)
+        joblib.dump({'rollouts': rollouts}, fname, compress=3)
 
-            self._save_rollouts_file(itr, train_rollouts)
-            self._save_rollouts_file(itr, eval_rollouts, eval=True)
+    def _save_train_policy(self, itr):
+        self._policy.save(self._train_policy_file_name(itr), train=True)
+
+    def _save_inference_policy(self, itr):
+        self._policy.save(self._inference_policy_file_name(itr), train=False)
+
+    def _save_train(self, itr):
+        self._save_train_policy(itr)
+        self._save_inference_policy(itr)
+
+    def _save_inference(self, itr, train_rollouts, eval_rollouts):
+        self._save_train_rollouts(itr, train_rollouts)
+        self._save_eval_rollouts(itr, eval_rollouts)
+
+    def _save(self, itr, train_rollouts, eval_rollouts):
+        self._save_train(itr)
+        self._save_inference(itr, train_rollouts, eval_rollouts)
+
+    ###############
+    ### Restore ###
+    ###############
+
+    def _get_train_itr(self):
+        train_itr = 0
+        while os.path.exists(self._train_policy_file_name(train_itr)):
+            train_itr += 1
+
+        return train_itr
+
+    def _get_inference_itr(self):
+        inference_itr = 0
+        while os.path.exists(self._train_rollouts_file_name(inference_itr)):
+            inference_itr += 1
+
+        return inference_itr
+
+    def _restore_train_rollouts(self):
+        """
+        :return: iteration that it is currently on
+        """
+        itr = 0
+        rollout_filenames = []
+        while True:
+            fname = self._train_rollouts_file_name(itr)
+            if not os.path.exists(fname):
+                break
+
+            rollout_filenames.append(fname)
+            itr += 1
+
+        logger.log('Restoring {0} iterations of train rollouts....')
+        self._sampler.add_rollouts(rollout_filenames)
+        logger.log('Done restoring rollouts!')
+
+    def _restore_train_policy(self):
+        """
+        :return: iteration that it is currently on
+        """
+        itr = 0
+        while os.path.exists(self._train_policy_file_name(itr)):
+            itr += 1
+
+        if itr > 0:
+            logger.log('Loading train policy from iteration {0}...'.format(itr - 1))
+            self._policy.restore(self._train_policy_file_name(itr - 1), train=True)
+            logger.log('Loaded train policy!')
+
+    def _restore_inference_policy(self):
+        """
+        :return: iteration that it is currently on
+        """
+        itr = 0
+        while os.path.exists(self._inference_policy_file_name(itr)):
+            itr += 1
+
+        if itr > 0:
+            logger.log('Loading inference policy from iteration {0}...'.format(itr - 1))
+            self._policy.restore(self._inference_policy_file_name(itr - 1), train=False)
+            logger.log('Loaded inference policy!')
+
+    def _restore(self):
+        self._restore_train_rollouts()
+        self._restore_train_policy()
+
+        train_itr = self._get_train_itr()
+        inference_itr = self._get_inference_itr()
+        assert (train_itr == inference_itr)
+        return train_itr
 
     ########################
     ### Training methods ###
@@ -104,7 +202,9 @@ class GCG(RLAlgorithm):
 
     @overrides
     def train(self):
-        save_itr = 0
+        ### restore where we left off
+        save_itr = self._restore()
+
         target_updated = False
         eval_rollouts = []
 
@@ -179,15 +279,11 @@ class GCG(RLAlgorithm):
             ### save model
             if step > 0 and step % self._save_every_n_steps == 0:
                 logger.log('Saving files')
-                self._save_params(save_itr,
-                                  train_rollouts=self._sampler.get_recent_paths(),
-                                  eval_rollouts=eval_rollouts)
+                self._save(save_itr, self._sampler.get_recent_paths(), eval_rollouts)
                 save_itr += 1
                 eval_rollouts = []
 
-        self._save_params(save_itr,
-                          train_rollouts=self._sampler.get_recent_paths(),
-                          eval_rollouts=eval_rollouts)
+        self._save(save_itr, self._sampler.get_recent_paths(), eval_rollouts)
 
 def run_gcg(params):
     # copy yaml for posterity

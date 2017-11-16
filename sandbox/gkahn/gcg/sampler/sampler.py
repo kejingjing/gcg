@@ -113,27 +113,24 @@ class RNNCriticSampler(object):
 
         self._curr_observations = next_observations
 
-    #####################
-    ### Add offpolicy ###
-    #####################
+    ####################
+    ### Add rollouts ###
+    ####################
 
-    def _rollouts_file(self, folder, itr):
-        return os.path.join(folder, 'itr_{0:d}_rollouts.pkl'.format(itr))
-
-    def add_offpolicy(self, offpolicy_folder, num_offpolicy):
+    def add_rollouts(self, rollout_filenames, max_to_add=None):
         step = 0
         itr = 0
         replay_pools = itertools.cycle(self._replay_pools)
         done_adding = False
 
-        while os.path.exists(self._rollouts_file(offpolicy_folder, itr)):
-            rollouts = joblib.load(self._rollouts_file(offpolicy_folder, itr))['rollouts']
+        for fname in rollout_filenames:
+            rollouts = joblib.load(fname)['rollouts']
             itr += 1
 
             for rollout, replay_pool in zip(rollouts, replay_pools):
                 r_len = len(rollout['dones'])
-                if step + r_len >= num_offpolicy:
-                    diff = num_offpolicy - step
+                if max_to_add is not None and step + r_len >= max_to_add:
+                    diff = max_to_add - step
                     for k in ('observations', 'actions', 'rewards', 'dones', 'logprobs'):
                         rollout[k] = rollout[k][:diff]
                     done_adding = True
