@@ -7,7 +7,7 @@ from sklearn.utils.extmath import cartesian
 import tensorflow as tf
 
 from rllab.core.serializable import Serializable
-import rllab.misc.logger as logger
+import rllab.misc.logger as rllab_logger
 from rllab.misc import ext
 
 from sandbox.rocky.tf.spaces.discrete import Discrete
@@ -754,8 +754,8 @@ class MACPolicy(Parameterized, Serializable):
     def log(self):
         for k in sorted(self._log_stats.keys()):
             if k == 'Depth':
-                logger.record_tabular(k+'Mean', np.mean(self._log_stats[k]))
-                logger.record_tabular(k+'Std', np.std(self._log_stats[k]))
+                rllab_logger.record_tabular(k+'Mean', np.mean(self._log_stats[k]))
+                rllab_logger.record_tabular(k+'Std', np.std(self._log_stats[k]))
             else:
-                logger.record_tabular(k, np.mean(self._log_stats[k]))
+                rllab_logger.record_tabular(k, np.mean(self._log_stats[k]))
         self._log_stats.clear()

@@ -1,17 +1,13 @@
-import os, time
+import os
 import argparse
 import yaml
 
 from rllab import config
 from sandbox.gkahn.gcg.algos.gcg import run_gcg
-from rllab.misc.instrument import stub, run_experiment_lite
+from rllab.misc.instrument import run_experiment_lite
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--exps', nargs='+')
-parser.add_argument('-mode', type=str, default='local')
-parser.add_argument('--confirm_remote', action='store_false')
-parser.add_argument('--dry', action='store_true')
-parser.add_argument('-region', type=str, choices=('us-west-1', 'us-west-2', 'us-east-1', 'us-east-2'), default='us-west-1')
 args = parser.parse_args()
 
 for exp in args.exps:

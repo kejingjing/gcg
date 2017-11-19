@@ -31,7 +31,7 @@ alg:
   onpolicy_after_n_steps: 4.e+3 # take random actions until this many steps is reached
   
   learn_after_n_steps: 1.e+3 # when to start training the model
-  train_every_n_steps: 0.25 # number of calls to model.train per env.step (if fractional, multiple trains per step)
+  train_every_n_steps: 0.25 # number of to calls model.train per env.step (if fractional, multiple trains per step)
   eval_every_n_steps: 5.e+2 # how often to evaluate policy in env_eval
 
   update_target_after_n_steps: -1 # after which the target network can be updated

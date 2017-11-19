@@ -3,7 +3,7 @@ import itertools
 from collections import defaultdict
 import numpy as np
 
-import rllab.misc.logger as logger
+import rllab.misc.logger as rllab_logger
 
 from sandbox.gkahn.gcg.utils.utils import timeit
 
@@ -443,22 +443,22 @@ class RNNCriticReplayPool(object):
         log_stats = defaultdict(list)
         for k in all_log_stats[0].keys():
             log_stats[k] = join([ls[k] for ls in all_log_stats])
-        logger.record_tabular(prefix+'CumRewardMean', np.mean(log_stats['CumReward']))
-        logger.record_tabular(prefix+'CumRewardStd', np.std(log_stats['CumReward']))
-        logger.record_tabular(prefix+'AvgRewardMean', np.mean(log_stats['AvgReward']))
-        logger.record_tabular(prefix+'AvgRewardStd', np.std(log_stats['AvgReward']))
-        logger.record_tabular(prefix+'FinalRewardMean', np.mean(log_stats['FinalReward']))
-        logger.record_tabular(prefix+'FinalRewardStd', np.std(log_stats['FinalReward']))
-        logger.record_tabular(prefix+'EpisodeLengthMean', np.mean(log_stats['EpisodeLength']))
-        logger.record_tabular(prefix+'EpisodeLengthStd', np.std(log_stats['EpisodeLength']))
-        logger.record_tabular(prefix+'EstValuesAvgDiffMean', np.mean(log_stats['EstValuesAvgDiff']))
-        logger.record_tabular(prefix+'EstValuesAvgDiffStd', np.std(log_stats['EstValuesAvgDiff']))
-        logger.record_tabular(prefix+'EstValuesMaxDiffMean', np.mean(log_stats['EstValuesMaxDiff']))
-        logger.record_tabular(prefix+'EstValuesMaxDiffStd', np.std(log_stats['EstValuesMaxDiff']))
-        logger.record_tabular(prefix+'EstValuesMinDiffMean', np.mean(log_stats['EstValuesMinDiff']))
-        logger.record_tabular(prefix+'EstValuesMinDiffStd', np.std(log_stats['EstValuesMinDiff']))
-        logger.record_tabular(prefix+'NumEpisodes', len(log_stats['EpisodeLength']))
-        logger.record_tabular(prefix+'Time', np.mean(log_stats['Time']))
+        rllab_logger.record_tabular(prefix+'CumRewardMean', np.mean(log_stats['CumReward']))
+        rllab_logger.record_tabular(prefix+'CumRewardStd', np.std(log_stats['CumReward']))
+        rllab_logger.record_tabular(prefix+'AvgRewardMean', np.mean(log_stats['AvgReward']))
+        rllab_logger.record_tabular(prefix+'AvgRewardStd', np.std(log_stats['AvgReward']))
+        rllab_logger.record_tabular(prefix+'FinalRewardMean', np.mean(log_stats['FinalReward']))
+        rllab_logger.record_tabular(prefix+'FinalRewardStd', np.std(log_stats['FinalReward']))
+        rllab_logger.record_tabular(prefix+'EpisodeLengthMean', np.mean(log_stats['EpisodeLength']))
+        rllab_logger.record_tabular(prefix+'EpisodeLengthStd', np.std(log_stats['EpisodeLength']))
+        rllab_logger.record_tabular(prefix+'EstValuesAvgDiffMean', np.mean(log_stats['EstValuesAvgDiff']))
+        rllab_logger.record_tabular(prefix+'EstValuesAvgDiffStd', np.std(log_stats['EstValuesAvgDiff']))
+        rllab_logger.record_tabular(prefix+'EstValuesMaxDiffMean', np.mean(log_stats['EstValuesMaxDiff']))
+        rllab_logger.record_tabular(prefix+'EstValuesMaxDiffStd', np.std(log_stats['EstValuesMaxDiff']))
+        rllab_logger.record_tabular(prefix+'EstValuesMinDiffMean', np.mean(log_stats['EstValuesMinDiff']))
+        rllab_logger.record_tabular(prefix+'EstValuesMinDiffStd', np.std(log_stats['EstValuesMinDiff']))
+        rllab_logger.record_tabular(prefix+'NumEpisodes', len(log_stats['EpisodeLength']))
+        rllab_logger.record_tabular(prefix+'Time', np.mean(log_stats['Time']))
 
     @staticmethod
     def get_recent_paths_pools(replay_pools):

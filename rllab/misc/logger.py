@@ -188,12 +188,15 @@ table_printer = TerminalTablePrinter()
 
 def dump_tabular(*args, **kwargs):
     wh = kwargs.pop("write_header", None)
+    is_print = kwargs.pop("is_print", True)
     if len(_tabular) > 0:
-        if _log_tabular_only:
-            table_printer.print_tabular(_tabular)
-        else:
-            for line in tabulate(_tabular).split('\n'):
-                log(line, *args, **kwargs)
+        log_str = tabulate(_tabular)
+        if is_print:
+            if _log_tabular_only:
+                table_printer.print_tabular(_tabular)
+            else:
+                for line in tabulate(_tabular).split('\n'):
+                    log(line, *args, **kwargs)
         tabular_dict = dict(_tabular)
         # Also write to the csv files
         # This assumes that the keys in each iteration won't change!
@@ -205,6 +208,7 @@ def dump_tabular(*args, **kwargs):
             writer.writerow(tabular_dict)
             tabular_fd.flush()
         del _tabular[:]
+    return log_str
 
 
 def pop_prefix():

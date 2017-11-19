@@ -70,7 +70,7 @@ class EvalExp(object):
         with graph.as_default(), sess.as_default():
             policy = self._load_itr_policy(itr)
 
-            logger.log('Evaluating policy for itr {0}'.format(itr))
+            print('Evaluating policy for itr {0}'.format(itr))
             n_envs = 1
             if 'max_path_length' in self.params['alg']:
                 max_path_length = self.params['alg']['max_path_length']
@@ -88,14 +88,14 @@ class EvalExp(object):
             )
             rollouts = []
             step = 0
-            logger.log('Starting rollout {0}'.format(len(rollouts)))
+            print('Starting rollout {0}'.format(len(rollouts)))
             while len(rollouts) < self._num_rollouts:
                 sampler.step(step)
                 step += n_envs
                 new_rollouts = sampler.get_recent_paths()
                 if len(new_rollouts) > 0:
                     rollouts += new_rollouts
-                    logger.log('Starting rollout {0}'.format(len(rollouts)))
+                    print('Starting rollout {0}'.format(len(rollouts)))
                     self.save_eval_rollouts(itr, rollouts)
 
 if __name__ == '__main__':

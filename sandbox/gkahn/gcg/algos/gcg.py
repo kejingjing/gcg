@@ -1,10 +1,10 @@
-import os
+import os, glob
 import joblib
 import numpy as np
 
 from rllab.algos.base import RLAlgorithm
 from rllab.misc.overrides import overrides
-import rllab.misc.logger as logger
+import rllab.misc.logger as rllab_logger
 from rllab import config
 
 from sandbox.gkahn.gcg.envs.env_utils import create_env
@@ -12,6 +12,7 @@ from sandbox.gkahn.gcg.policies.mac_policy import MACPolicy
 from sandbox.gkahn.gcg.policies.rccar_mac_policy import RCcarMACPolicy
 from sandbox.gkahn.gcg.sampler.sampler import RNNCriticSampler
 from sandbox.gkahn.gcg.utils.utils import timeit
+from sandbox.gkahn.gcg.utils import logger
 
 class GCG(RLAlgorithm):
 
@@ -52,9 +53,9 @@ class GCG(RLAlgorithm):
 
         if kwargs.get('offpolicy', None) is not None:
             assert(os.path.exists(kwargs['offpolicy']))
-            logger.log('Loading offpolicy data from {0}'.format(kwargs['offpolicy']))
+            logger.info('Loading offpolicy data from {0}'.format(kwargs['offpolicy']))
             self._sampler.add_offpolicy(kwargs['offpolicy'], int(kwargs['num_offpolicy']))
-            logger.log('Added {0} samples'.format(len(self._sampler)))
+            logger.info('Added {0} samples'.format(len(self._sampler)))
 
         alg_args = kwargs
         self._total_steps = int(alg_args['total_steps'])
@@ -81,7 +82,7 @@ class GCG(RLAlgorithm):
 
     @property
     def _save_dir(self):
-        return logger.get_snapshot_dir()
+        return rllab_logger.get_snapshot_dir()
 
     def _train_rollouts_file_name(self, itr):
         return os.path.join(self._save_dir, 'itr_{0:04d}_train_rollouts.pkl'.format(itr))
@@ -131,7 +132,7 @@ class GCG(RLAlgorithm):
 
     def _get_train_itr(self):
         train_itr = 0
-        while os.path.exists(self._train_policy_file_name(train_itr)):
+        while len(glob.glob(self._inference_policy_file_name(train_itr) + '*')) > 0:
             train_itr += 1
 
         return train_itr
@@ -157,35 +158,35 @@ class GCG(RLAlgorithm):
             rollout_filenames.append(fname)
             itr += 1
 
-        logger.log('Restoring {0} iterations of train rollouts....')
+        logger.info('Restoring {0} iterations of train rollouts....'.format(itr))
         self._sampler.add_rollouts(rollout_filenames)
-        logger.log('Done restoring rollouts!')
+        logger.info('Done restoring rollouts!')
 
     def _restore_train_policy(self):
         """
         :return: iteration that it is currently on
         """
         itr = 0
-        while os.path.exists(self._train_policy_file_name(itr)):
+        while len(glob.glob(self._train_policy_file_name(itr) + '*')) > 0:
             itr += 1
 
         if itr > 0:
-            logger.log('Loading train policy from iteration {0}...'.format(itr - 1))
+            logger.info('Loading train policy from iteration {0}...'.format(itr - 1))
             self._policy.restore(self._train_policy_file_name(itr - 1), train=True)
-            logger.log('Loaded train policy!')
+            logger.info('Loaded train policy!')
 
     def _restore_inference_policy(self):
         """
         :return: iteration that it is currently on
         """
         itr = 0
-        while os.path.exists(self._inference_policy_file_name(itr)):
+        while len(glob.glob(self._inference_policy_file_name(itr) + '*')) > 0:
             itr += 1
 
         if itr > 0:
-            logger.log('Loading inference policy from iteration {0}...'.format(itr - 1))
+            logger.info('Loading inference policy from iteration {0}...'.format(itr - 1))
             self._policy.restore(self._inference_policy_file_name(itr - 1), train=False)
-            logger.log('Loaded inference policy!')
+            logger.info('Loaded inference policy!')
 
     def _restore(self):
         self._restore_train_rollouts()
@@ -193,7 +194,8 @@ class GCG(RLAlgorithm):
 
         train_itr = self._get_train_itr()
         inference_itr = self._get_inference_itr()
-        assert (train_itr == inference_itr)
+        assert (train_itr == inference_itr,
+                'Train itr is {0} but inference itr is {1}'.format(train_itr, inference_itr))
         return train_itr
 
     ########################
@@ -222,7 +224,6 @@ class GCG(RLAlgorithm):
 
             ### sample and DON'T add to buffer (for validation)
             if step > 0 and step % self._eval_every_n_steps == 0:
-                # logger.log('Evaluating')
                 timeit.start('eval')
                 eval_rollouts_step = []
                 eval_step = step
@@ -236,7 +237,6 @@ class GCG(RLAlgorithm):
             if step >= self._learn_after_n_steps:
                 ### update preprocess
                 if step == self._learn_after_n_steps or step % self._update_preprocess_every_n_steps == 0:
-                    # logger.log('Updating preprocess')
                     self._policy.update_preprocess(self._sampler.statistics)
 
                 ### training step
@@ -259,26 +259,25 @@ class GCG(RLAlgorithm):
 
                 ### update target network
                 if step > self._update_target_after_n_steps and step % self._update_target_every_n_steps == 0:
-                    # logger.log('Updating target network')
                     self._policy.update_target()
                     target_updated = True
 
                 ### log
                 if step % self._log_every_n_steps == 0:
-                    logger.log('step %.3e' % step)
-                    logger.record_tabular('Step', step)
+                    logger.info('step %.3e' % step)
+                    rllab_logger.record_tabular('Step', step)
                     self._sampler.log()
                     self._eval_sampler.log(prefix='Eval')
                     self._policy.log()
-                    logger.dump_tabular(with_prefix=False)
+                    rllab_logger.dump_tabular(with_prefix=False)
                     timeit.stop('total')
-                    logger.log('\n'+str(timeit))
+                    logger.debug('\n'+str(timeit))
                     timeit.reset()
                     timeit.start('total')
 
             ### save model
             if step > 0 and step % self._save_every_n_steps == 0:
-                logger.log('Saving files')
+                logger.info('Saving files for itr {0}'.format(save_itr))
                 self._save(save_itr, self._sampler.get_recent_paths(), eval_rollouts)
                 save_itr += 1
                 eval_rollouts = []
@@ -286,9 +285,12 @@ class GCG(RLAlgorithm):
         self._save(save_itr, self._sampler.get_recent_paths(), eval_rollouts)
 
 def run_gcg(params):
+    logger.setup_logger(os.path.join(rllab_logger.get_snapshot_dir(), 'log.txt'),
+                        params['log_level'])
+
     # copy yaml for posterity
     try:
-        yaml_path = os.path.join(logger.get_snapshot_dir(), '{0}.yaml'.format(params['exp_name']))
+        yaml_path = os.path.join(rllab_logger.get_snapshot_dir(), '{0}.yaml'.format(params['exp_name']))
         with open(yaml_path, 'w') as f:
             f.write(params['txt'])
     except:

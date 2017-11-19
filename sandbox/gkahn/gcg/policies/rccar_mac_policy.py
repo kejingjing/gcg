@@ -442,6 +442,10 @@ class RCcarMACPolicy(MACPolicy, Serializable):
                                                tf_target_get_action_values)
             tf_opt, tf_lr_ph = self._graph_optimize(tf_cost, tf_trainable_policy_vars)
 
+            ### savers
+            tf_saver_inference = tf.train.Saver(tf_policy_vars, max_to_keep=None)
+            tf_saver_train = tf.train.Saver(max_to_keep=None)
+
             ### initialize
             self._graph_init_vars(tf_sess)
 
@@ -468,7 +472,9 @@ class RCcarMACPolicy(MACPolicy, Serializable):
             'opt': tf_opt,
             'lr_ph': tf_lr_ph,
             'policy_vars': tf_policy_vars,
-            'target_vars': tf_target_vars
+            'target_vars': tf_target_vars,
+            'saver_inference': tf_saver_inference,
+            'saver_train': tf_saver_train
         }
 
     ################
