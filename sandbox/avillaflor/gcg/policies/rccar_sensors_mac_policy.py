@@ -359,13 +359,13 @@ class RCcarSensorsMACPolicy(MACPolicy, Serializable):
 #        else:
 
         # TODO
-        tf_values_all_select = self._get_action_value(tf_actions, tf_values_softmax_all_select, tf_values_all_select, tf_goal_vec)
-        tf_values_all_eval = self._get_action_value(tf_actions, tf_values_softmax_all_eval, tf_values_all_eval, tf_goal_vec)
+        tf_values_select = self._get_action_value(tf_actions, tf_values_softmax_all_select, tf_values_all_select, tf_goal_vec)
+        tf_values_eval = self._get_action_value(tf_actions, tf_values_softmax_all_eval, tf_values_all_eval, tf_goal_vec)
 #        tf_values_all_select = -tf_values_all_select
 #        tf_values_all_eval = -tf_values_all_eval
 
         ### get_action based on select (policy)
-        tf_values_select = tf.reduce_sum(tf_values_all_select * tf_values_softmax_all_select, reduction_indices=(1,))  # [num_obs*K]
+#        tf_values_select = tf.reduce_sum(tf_values_all_select * tf_values_softmax_all_select, reduction_indices=(1,))  # [num_obs*K]
         tf_values_select = tf.reshape(tf_values_select, (num_obs, K))  # [num_obs, K]
         tf_values_argmax_select = tf.one_hot(tf.argmax(tf_values_select, 1), depth=K)  # [num_obs, K]
         tf_get_action = tf.reduce_sum(
@@ -373,7 +373,7 @@ class RCcarSensorsMACPolicy(MACPolicy, Serializable):
             tf.reshape(tf_actions, (num_obs, K, H, action_dim))[:, :, 0, :],
             reduction_indices=1)  # [num_obs, action_dim]
         ### get_action_value based on eval (target)
-        tf_values_eval = tf.reduce_sum(tf_values_all_eval * tf_values_softmax_all_eval, reduction_indices=(1,))  # [num_obs*K]
+#        tf_values_eval = tf.reduce_sum(tf_values_all_eval * tf_values_softmax_all_eval, reduction_indices=(1,))  # [num_obs*K]
         tf_values_eval = tf.reshape(tf_values_eval, (num_obs, K))  # [num_obs, K]
         tf_get_action_value = tf.reduce_sum(tf_values_argmax_select * tf_values_eval, reduction_indices=1)
         tf_get_action_reset_ops = []
@@ -500,6 +500,7 @@ class RCcarSensorsMACPolicy(MACPolicy, Serializable):
 #            return - self._action_value_alpha[0] * tf_graph_output_values[:, :, 0] + self._action_value_alpha[1] * ((tf.cos(tf_graph_output_values[:, :, 1] - tf_goal_vec[:, 0]) + 1.) / 2.)
 #        else:
 #            raise NotImplementedError
+        tf_mask = tf.expand_dims(tf_mask, axis=2)
         value = 0.
         for action_value_term in self._action_value_terms:
             ty = action_value_term.get('type')

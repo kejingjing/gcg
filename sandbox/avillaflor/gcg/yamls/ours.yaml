@@ -168,7 +168,7 @@ policy:
 #    action_value_alpha: [1.0, 1.0]
    
     action_value_terms:
-      - :
+      - ori:
         type: 'goal'
         alpha: 1.0
         dim: 1
@@ -176,7 +176,7 @@ policy:
         goal_pos: 0
         fn: 'cos'
         multiply: 'probcoll' # / 'probnocoll' 
-      - :
+      - probcoll:
         type: 'probcoll'
         alpha: 1.0
         fn :

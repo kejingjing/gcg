@@ -45,7 +45,7 @@ class SimpleRoomClutteredEnv(RoomClutteredEnv):
 
     @property
     def horizon(self):
-        return 50
+        return 45
 
 if __name__ == '__main__':
     params = {'visualize': True, 'run_as_task': True, 'do_back_up': True, 'hfov': 120}
