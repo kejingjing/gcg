@@ -1,12 +1,12 @@
 import os, time
 import argparse
 import yaml
+import multiprocessing
 
 from rllab import config
 from sandbox.avillaflor.gcg.algos.gcg import run_gcg
 from rllab.misc.instrument import stub, run_experiment_lite, VariantGenerator
-
-import multiprocessing
+import rllab.misc.logger as logger
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--exps', nargs='+')
@@ -27,10 +27,8 @@ def thread_fn(exp_params, gpus, usage, sem, lock):
             exp_params['policy']['gpu_device'] = int(gpu)
             usage[i] -= 1
             break
-    print(gpus)
     lock.release()
     config.USE_TF = True
-    print(exp_params['policy']['gpu_device'])
     run_experiment_lite(
         run_gcg,
         snapshot_mode="all",
@@ -64,6 +62,9 @@ for exp in args.exps:
 #    for i in args.gpus:
 #        gpus.append([i, num_per_gpu])
     
+    if len(gpus) * num_per_gpu > 1:
+        logger.set_log_tabular_only(True)
+    
     # for multiprocessing
     sem = multiprocessing.Semaphore(len(gpus) * num_per_gpu)
     lock = multiprocessing.Lock()
@@ -80,7 +81,8 @@ for exp in args.exps:
             exp_params = {**params}
             exp_params['policy']['RCcarSensorsMACPolicy']['output_sensors'][1].update(variant)
 #            exp_params = {**params, **variant}
-            exp_params['exp_prefix'] ='{0}_{1}'.format(vg.to_name_suffix(variant), exp_params['exp_prefix'])
+#            exp_params['exp_prefix'] ='{0}_{1}_seed_{2}'.format(vg.to_name_suffix(variant), exp_params['exp_prefix'], seed)
+            exp_params['exp_name'] ='{0}_seed_{1}'.format(vg.to_name_suffix(variant), seed)
             exp_params['seed'] = seed
             p = multiprocessing.Process(target=thread_fn, args=(exp_params, gpus, usage, sem, lock))
             p.start()

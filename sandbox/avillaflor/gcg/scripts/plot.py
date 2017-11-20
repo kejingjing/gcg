@@ -1,23 +1,26 @@
 import joblib
 import yaml
 import os
+import argparse
+import numpy as np
 
 import matplotlib
 import matplotlib.pyplot as plt
 
 class Plot:
 
-    def __init__(self, data_dir, yaml_path, save_dir=None):
+    def __init__(self, data_dir, save_dir=None):
         self._data_dir = data_dir
         if save_dir is None:
             self._save_dir = data_dir
         else:
             self._save_dir = save_dir
-
+        if self._data_dir[-1] == '/':
+            self._name = os.path.split(self._data_dir[:-1])[-1]
+        else:
+            self._name = os.path.split(self._data_dir)[-1]
         self._rollouts = self._get_rollouts() 
         self._rollouts_eval = self._get_rollouts(testing=True) 
-        with open(yaml_path, "rb") as f:
-            self._params = yaml.load(f)
 
     #############
     ### Files ###
@@ -32,17 +35,30 @@ class Plot:
 
     def _plot_stats_file(self, testing=False):
         if testing:
-            return os.path.join(self._image_folder, 'testing_stats.png')
+            return os.path.join(self._image_folder, '{0}_{1}'.format(self._name, 'stats_testing.png'))
         else:
-            return os.path.join(self._image_folder, 'stats.png')
+            return os.path.join(self._image_folder, '{0}_{1}'.format(self._name, 'stats.png'))
 
     def _plot_trajectories_file(self, itr, testing=False):
         if testing:
-            prefix = 'testing_'
+            suffix = 'testing'
         else:
-            prefix = ''
-        return os.path.join(self._image_folder, '{0}trajectories_{1}.png'.format(prefix, itr))
+            suffix = ''
+        return os.path.join(self._image_folder, 'trajectories_{0}_{1}.png'.format(itr, suffix))
 
+    ###############
+    ### Getters ###
+    ###############
+
+    def get_name(self):
+        return self._name
+
+    def get_rollouts(self):
+        return self._rollouts
+
+    def get_rollouts_eval(self):
+        return self._rollouts_eval
+    
     #######################
     ### Data Processing ###
     #######################
@@ -54,8 +70,7 @@ class Plot:
             fname = "itr_{0}_rollouts.pkl".format(itr)
         path = os.path.join(self._data_dir, fname)
         if os.path.exists(path):
-            with open(path, "rb") as f:
-                rollouts_dict = joblib.load(f)
+            rollouts_dict = joblib.load(path)
             rollouts = rollouts_dict['rollouts']
             return rollouts
         else:
@@ -84,31 +99,35 @@ class Plot:
         
         f, axes = plt.subplots(2, 1, sharex=True, figsize=(15,15))
         crashes = []
+        avg_crashes = []
         rewards = []
+        avg_rewards = []
         times = []
         time_tot = 0
         for itr, rollout in enumerate(rollouts):
-            num_coll = 0
-            itr_reward = 0
+            num_coll = 0.
+            itr_reward = 0.
             itr_time = 0
             for trajectory in rollout:
                 env_infos = trajectory['env_infos']
-                rs = trajectory['rewards']
+                rs = [env_info['reward'] for env_info in env_infos]
                 num_coll += int(env_infos[-1]['coll'])
                 itr_reward += sum(rs)
                 itr_time += len(rs) / 240.
             time_tot += itr_time
-            crashes.append(num_coll/itr_time)
+            crashes.append(num_coll/len(rollout))
+            avg_crashes.append(np.mean(crashes[-12:]))
             times.append(time_tot)
-            rewards.append(itr_reward)
+            rewards.append(itr_reward/len(rollout))
+            avg_rewards.append(np.mean(rewards[-12:]))
 
-        axes[0].set_title('Crashes per time')
-        axes[0].set_ylabel('Crashes')
+        axes[0].set_title('Percent Crashes')
+        axes[0].set_ylabel('% Crashes')
         axes[1].set_title('Reward over time')
         axes[1].set_ylabel('R')
         axes[1].set_xlabel('min')
-        axes[0].plot(times, crashes)
-        axes[1].plot(times, rewards)
+        axes[0].plot(times, avg_crashes)
+        axes[1].plot(times, avg_rewards)
         f.savefig(self._plot_stats_file(testing)) 
         plt.close()
     
@@ -148,14 +167,19 @@ class Plot:
             plt.savefig(self._plot_trajectories_file(itr, testing)) 
             plt.close()
 
-
 ############
 ### Main ###
 ############
 
 if __name__ == '__main__':
-    plot = Plot("/home/adam/gcg/data/local/sim-rccar/ours", "/home/adam/gcg/sandbox/avillaflor/gcg/yamls/ours.yaml")
-    plot.plot_trajectories()
-    plot.plot_trajectories(testing=True)
+    parser = argparse.ArgumentParser()
+    parser.add_argument('data_dir', type=str)
+    parser.add_argument('--save_dir', type=str, default=None)
+    parser.add_argument('--plot_traj', action='store_true')
+    args = parser.parse_args()
+    plot = Plot(args.data_dir, save_dir=args.save_dir)
+    if args.plot_traj:
+        plot.plot_trajectories()
+        plot.plot_trajectories(testing=True)
     plot.plot_stats()
     plot.plot_stats(testing=True)

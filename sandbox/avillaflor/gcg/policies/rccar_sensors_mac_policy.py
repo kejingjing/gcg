@@ -20,8 +20,9 @@ class RCcarSensorsMACPolicy(MACPolicy, Serializable):
         self._output_dim = kwargs['output_dim']
         self._output_sensors = kwargs['output_sensors'] 
         self._input_sensors = kwargs['input_sensors']
-        self._action_value_fn = kwargs['action_value_fn']
-        self._action_value_alpha = kwargs['action_value_alpha']
+        self._action_value_terms = kwargs['action_value_terms']
+#        self._action_value_fn = kwargs['action_value_fn']
+#        self._action_value_alpha = kwargs['action_value_alpha']
         MACPolicy.__init__(self, **kwargs)
 
         assert(self._H == self._N)
@@ -358,8 +359,8 @@ class RCcarSensorsMACPolicy(MACPolicy, Serializable):
 #        else:
 
         # TODO
-        tf_values_all_select = self._get_action_value(tf_values_all_select, tf_goal_vec)
-        tf_values_all_eval = self._get_action_value(tf_values_all_eval, tf_goal_vec)
+        tf_values_all_select = self._get_action_value(tf_actions, tf_values_softmax_all_select, tf_values_all_select, tf_goal_vec)
+        tf_values_all_eval = self._get_action_value(tf_actions, tf_values_softmax_all_eval, tf_values_all_eval, tf_goal_vec)
 #        tf_values_all_select = -tf_values_all_select
 #        tf_values_all_eval = -tf_values_all_eval
 
@@ -491,14 +492,53 @@ class RCcarSensorsMACPolicy(MACPolicy, Serializable):
 
             return tf_get_action, tf_get_action_value, tf_get_action_reset_ops
 
-    def _get_action_value(self, tf_graph_output_values, tf_goal_vec):
-        if self._action_value_fn == 'prob_heading':
-            return (1. - tf_graph_output_values[:, :, 0]) * ((tf.cos(tf_graph_output_values[:, :, 1] - tf_goal_vec[:, 0]) + 1.) / 2.)
-        elif self._action_value_fn == 'prob_plus_heading':
-            # TODO
-            return - self._action_value_alpha[0] * tf_graph_output_values[:, :, 0] + self._action_value_alpha[1] * ((tf.cos(tf_graph_output_values[:, :, 1] - tf_goal_vec[:, 0]) + 1.) / 2.)
-        else:
-            raise NotImplementedError
+    def _get_action_value(self, tf_actions, tf_mask, tf_graph_output_values, tf_goal_vec):
+#        if self._action_value_fn == 'prob_heading':
+#            return (1. - tf_graph_output_values[:, :, 0]) * ((tf.cos(tf_graph_output_values[:, :, 1] - tf_goal_vec[:, 0]) + 1.) / 2.)
+#        elif self._action_value_fn == 'prob_plus_heading':
+#            # TODO
+#            return - self._action_value_alpha[0] * tf_graph_output_values[:, :, 0] + self._action_value_alpha[1] * ((tf.cos(tf_graph_output_values[:, :, 1] - tf_goal_vec[:, 0]) + 1.) / 2.)
+#        else:
+#            raise NotImplementedError
+        value = 0.
+        for action_value_term in self._action_value_terms:
+            ty = action_value_term.get('type')
+            alpha = action_value_term.get('alpha', 1.0)
+            fn = action_value_term.get('fn', None)
+            if fn == 'square':
+                tf_fn = tf.square
+            elif fn == 'cos':
+                tf_fn = lambda x: (tf.cos(x) + 1.) / 2.
+            elif fn is None:
+                tf_fn = tf.identity
+            else:
+                raise NotImplementedError
+            if ty == 'probcoll':
+                fv_value = tf_fn(1. - tf_graph_output_values[:, :, 0:1])
+                value += alpha * tf.reduce_sum(tf_mask * fn_value, axis=[1, 2]) 
+            else:
+                dim = action_value_term.get('dim')
+                pos = action_value_term.get('pos')
+                multiply = action_value_term.get('multiply', None)
+                if multiply == 'probcoll':
+                    multiplier = tf_graph_output_values[:, :, 0:1]
+                elif multiply == 'probnocoll':
+                    multiplier = 1. - tf_graph_output_values[:, :, 0:1]
+                elif multiply is None:
+                    multiplier = 1.
+                else:
+                    raise NotImplementedError
+                if ty == 'goal':
+
+                    goal_pos = action_value_term.get('goal_pos')
+                    goal = tf.expand_dims(tf_goal_vec[:, goal_pos:goal_pos+dim], axis=1)
+                    val = tf_graph_output_values[:, :, pos:pos+dim]
+                    fn_value = tf_fn(goal - val) * multiplier
+                    value += alpha * tf.reduce_sum(tf_mask * fn_value, axis=[1, 2])
+                elif ty == 'u_cost':
+                    fn_value = tf_fn(tf_actions[:, :, pos:pos+dim]) * multiplier
+                    value += alpha * tf.reduce_sum(tf_mask * fn_value, axis=[1, 2]) 
+        return value
 
     def _graph_cost(self, tf_train_values, tf_rewards_ph, tf_dones_ph, tf_obs_im_target_ph,
                     tf_obs_vec_target_ph, tf_target_get_action_values):
