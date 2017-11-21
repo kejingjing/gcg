@@ -21,8 +21,6 @@ class RCcarSensorsMACPolicy(MACPolicy, Serializable):
         self._output_sensors = kwargs['output_sensors'] 
         self._input_sensors = kwargs['input_sensors']
         self._action_value_terms = kwargs['action_value_terms']
-#        self._action_value_fn = kwargs['action_value_fn']
-#        self._action_value_alpha = kwargs['action_value_alpha']
         MACPolicy.__init__(self, **kwargs)
 
         assert(self._H == self._N)

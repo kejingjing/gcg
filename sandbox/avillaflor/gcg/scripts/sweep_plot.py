@@ -24,10 +24,16 @@ class MultiPlot:
         self._plots = []
         self._names = []
         for f in os.listdir(self._data_dir):
-            plot = Plot(os.path.join(self._data_dir, f))
-            if len(plot.get_rollouts()) > 0:
-                self._plots.append(plot)
-                self._names.append(plot.get_name())
+            path1 = os.path.join(self._data_dir, f)
+            seed_plots = []
+            for f2 in os.listdir(path1):
+                path2 = os.path.join(path1, f2)
+                plot = Plot(path2)
+                if len(plot.get_rollouts()) > 0:
+                    seed_plots.append(plot)
+            if len(seed_plots) > 0:
+                self._plots.append(seed_plots)
+                self._names.append(f)
 
     #############
     ### Files ###
@@ -58,35 +64,24 @@ class MultiPlot:
         axes[1].set_title('Reward over time')
         axes[1].set_ylabel('R')
         axes[1].set_xlabel('min')
-        
-        for plot in self._plots:
-            if testing:
-                rollouts = plot.get_rollouts_eval()
-            else:
-                rollouts = plot.get_rollouts()
-            
-            crashes = []
+       
+        datas_list = []
+
+        for seed_plots in self._plots:
+            seed_datas = []
+            for plot in seed_plots:
+                data = plot.get_stats_data(testing=testing)
+                seed_datas.append(data)
+            datas_list.append(seed_datas)
+
+        for seed_datas in datas_list:
             avg_crashes = []
-            rewards = []
             avg_rewards = []
             times = []
-            time_tot = 0
-            for itr, rollout in enumerate(rollouts):
-                num_coll = 0.
-                itr_reward = 0.
-                itr_time = 0
-                for trajectory in rollout:
-                    env_infos = trajectory['env_infos']
-                    rs = [env_info['reward'] for env_info in env_infos]
-                    num_coll += int(env_infos[-1]['coll'])
-                    itr_reward += sum(rs)
-                    itr_time += len(rs) / 240.
-                time_tot += itr_time
-                crashes.append(num_coll/len(rollout))
-                avg_crashes.append(np.mean(crashes[-12:]))
-                times.append(time_tot)
-                rewards.append(itr_reward/len(rollout))
-                avg_rewards.append(np.mean(rewards[-12:]))
+            for time in range(min([len(data[2]) for data in seed_datas])):
+                times.append(time / 240.)
+                avg_crashes.append(np.mean([data[0][time] for data in seed_datas]))
+                avg_rewards.append(np.mean([data[1][time] for data in seed_datas]))
 
             line, = axes[0].plot(times, avg_crashes)
             lines.append(line)

@@ -87,17 +87,12 @@ class Plot:
                 itr += 1
         return rollouts
 
-    ################
-    ### Plotting ###
-    ################
-
-    def plot_stats(self, testing=False):
+    def get_stats_data(self, testing=False):
         if testing:
             rollouts = self._rollouts_eval
         else:
             rollouts = self._rollouts
-        
-        f, axes = plt.subplots(2, 1, sharex=True, figsize=(15,15))
+
         crashes = []
         avg_crashes = []
         rewards = []
@@ -105,22 +100,27 @@ class Plot:
         times = []
         time_tot = 0
         for itr, rollout in enumerate(rollouts):
-            num_coll = 0.
-            itr_reward = 0.
-            itr_time = 0
             for trajectory in rollout:
                 env_infos = trajectory['env_infos']
-                rs = [env_info['reward'] for env_info in env_infos]
-                num_coll += int(env_infos[-1]['coll'])
-                itr_reward += sum(rs)
-                itr_time += len(rs) / 240.
-            time_tot += itr_time
-            crashes.append(num_coll/len(rollout))
-            avg_crashes.append(np.mean(crashes[-12:]))
-            times.append(time_tot)
-            rewards.append(itr_reward/len(rollout))
-            avg_rewards.append(np.mean(rewards[-12:]))
+                reward = sum([env_info['reward'] for env_info in env_infos])
+                coll = int(env_infos[-1]['coll'])
+                rewards.append(reward)
+                crashes.append(coll)
+                for time in range(len(trajectory['rewards'])):
+                    time_tot += 1./240.
+                    times.append(time_tot)
+                    avg_crashes.append(np.mean(crashes[-24:]))
+                    avg_rewards.append(np.mean(rewards[-24:]))
 
+        return avg_crashes, avg_rewards, times
+
+    ################
+    ### Plotting ###
+    ################
+
+    def plot_stats(self, testing=False):
+        avg_crashes, avg_rewards, times = self.get_stats_data(testing=testing)
+        f, axes = plt.subplots(2, 1, sharex=True, figsize=(15,15))
         axes[0].set_title('Percent Crashes')
         axes[0].set_ylabel('% Crashes')
         axes[1].set_title('Reward over time')
@@ -130,7 +130,7 @@ class Plot:
         axes[1].plot(times, avg_rewards)
         f.savefig(self._plot_stats_file(testing)) 
         plt.close()
-
+#
     def plot_trajectories(self, testing=False):
         blue_line = matplotlib.lines.Line2D([], [], color='b', label='collision')
         red_line = matplotlib.lines.Line2D([], [], color='r', label='no collision')

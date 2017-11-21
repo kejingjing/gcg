@@ -16,7 +16,6 @@ alg:
   n_envs: 1 # number of training environments
   render: False
   
-  
   ### Offpolicy data ###
   
   offpolicy: # folder path containing .pkl files with rollouts
@@ -26,7 +25,6 @@ alg:
   ### Steps ###
   
   total_steps: 2.4e+5 # corresponding to number of env.step(...) calls
-
   sample_after_n_steps: -1
   onpolicy_after_n_steps: 4.e+3 # take random actions until this many steps is reached
   

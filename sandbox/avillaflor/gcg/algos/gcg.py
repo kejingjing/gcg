@@ -19,7 +19,6 @@ class GCG(RLAlgorithm):
     def __init__(self, **kwargs):
 
         self._policy = kwargs['policy']
-
         self._batch_size = kwargs['batch_size']
         self._save_rollouts = kwargs['save_rollouts']
         self._save_rollouts_observations = kwargs['save_rollouts_observations']

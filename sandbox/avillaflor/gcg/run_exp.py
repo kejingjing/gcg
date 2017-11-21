@@ -22,6 +22,7 @@ for exp in args.exps:
     with open(yaml_path, 'r') as f:
         params_txt = ''.join(f.readlines())
     params['txt'] = params_txt
+    params['exp_name'] = '{0}/seed_{1}'.format(params['exp_name'], params['seed'])
 
     run_experiment_lite(
         run_gcg,
