@@ -173,7 +173,7 @@ policy:
         pos: 1
         goal_pos: 0
         fn: 'cos'
-        multiply: 'probcoll' # / 'probnocoll' 
+        multiply: 'probnocoll' # / 'probnocoll' 
       - probcoll:
         type: 'probcoll'
         alpha: 1.0

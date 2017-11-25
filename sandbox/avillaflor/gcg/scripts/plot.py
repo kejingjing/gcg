@@ -109,8 +109,8 @@ class Plot:
                 for time in range(len(trajectory['rewards'])):
                     time_tot += 1./240.
                     times.append(time_tot)
-                    avg_crashes.append(np.mean(crashes[-24:]))
-                    avg_rewards.append(np.mean(rewards[-24:]))
+                    avg_crashes.append(np.mean(crashes[-120:]))
+                    avg_rewards.append(np.mean(rewards[-120:]))
 
         return avg_crashes, avg_rewards, times
 
