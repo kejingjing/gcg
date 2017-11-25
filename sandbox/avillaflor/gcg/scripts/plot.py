@@ -130,7 +130,7 @@ class Plot:
         axes[1].plot(times, avg_rewards)
         f.savefig(self._plot_stats_file(testing)) 
         plt.close()
-#
+
     def plot_trajectories(self, testing=False):
         blue_line = matplotlib.lines.Line2D([], [], color='b', label='collision')
         red_line = matplotlib.lines.Line2D([], [], color='r', label='no collision')

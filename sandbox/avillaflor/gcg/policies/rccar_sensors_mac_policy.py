@@ -780,12 +780,16 @@ class RCcarSensorsMACPolicy(MACPolicy, Serializable):
 
             ### initialize
             self._graph_init_vars(tf_sess)
-
+            
+            ### saver
+            tf_saver = tf.train.Saver()
+            
         # TODO
         ### what to return
         return {
             'sess': tf_sess,
             'graph': tf_graph,
+            'saver': tf_saver,
             'obs_im_ph': tf_obs_im_ph,
             'obs_vec_ph': tf_obs_vec_ph,
             'actions_ph': tf_actions_ph,
@@ -928,4 +932,8 @@ class RCcarSensorsMACPolicy(MACPolicy, Serializable):
         for i, sensor in enumerate(self._output_sensors):
             self._log_stats['{0} cost'.format(sensor['name'])].append(costs[i])
 
+    def save_model(self, save_path):
+        self._tf_dict['saver'].save(self._tf_dict['sess'], save_path)
 
+    def restore_ckpt(self, ckpt_path):
+        self._tf_dict['saver'].restore(self._tf_dict['sess'], ckpt_path)

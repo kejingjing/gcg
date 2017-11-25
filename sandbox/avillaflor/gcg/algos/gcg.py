@@ -87,6 +87,11 @@ class GCG(RLAlgorithm):
         fname = os.path.join(logger.get_snapshot_dir(), fname)
         joblib.dump({'rollouts': rollouts}, fname, compress=3)
 
+    def _save_model_file(self, itr):
+        fname = 'itr_{0}.ckpt'.format(itr)
+        fname = os.path.join(logger.get_snapshot_dir(), fname)
+        self._policy.save_model(fname)
+
     def _save_params(self, itr, train_rollouts, eval_rollouts):
         with self._policy.session.as_default(), self._policy.session.graph.as_default():
             itr_params = dict(
@@ -94,6 +99,8 @@ class GCG(RLAlgorithm):
                 policy=self._policy,
             )
             logger.save_itr_params(itr, itr_params)
+            
+            self._save_model_file(itr)
 
             self._save_rollouts_file(itr, train_rollouts)
             self._save_rollouts_file(itr, eval_rollouts, eval=True)
