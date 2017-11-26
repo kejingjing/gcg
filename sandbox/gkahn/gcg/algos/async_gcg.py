@@ -55,7 +55,7 @@ class AsyncGCG(GCG):
                     os.path.join(self._remote_dir, ''),
                     os.path.join(self._save_dir, '')
                 )
-            recv_ret_code = os.system(recv_rsync_cmd)
+                recv_ret_code = os.system(recv_rsync_cmd)
 
             if send_retcode != 0:
                 logger.critical('rsync send failed')
@@ -106,6 +106,8 @@ class AsyncGCG(GCG):
         timeit.start('total')
         while True:
             inference_step = self._get_inference_step()
+            if inference_step > self._total_steps:
+                break
 
             if inference_step >= self._learn_after_n_steps:
                 ### update preprocess
@@ -149,7 +151,8 @@ class AsyncGCG(GCG):
                 train_itr += 1
 
             ### reset model
-            if train_step > 0 and train_step % self._train_reset_every_n_steps == 0:
+            if train_step > 0 and self._train_reset_every_n_steps is not None and \
+                                    train_step % self._train_reset_every_n_steps == 0:
                 logger.debug('Resetting model')
                 self._policy.reset_weights()
 
@@ -218,20 +221,26 @@ class AsyncGCG(GCG):
                     timeit.reset()
                     timeit.start('total')
 
-            ### save rollouts
+            ### save rollouts / load model
             if inference_step > 0 and inference_step % self._inference_save_every_n_steps == 0:
+                ### save rollouts
                 logger.debug('Saving files for itr {0}'.format(inference_itr))
                 self._save_inference(inference_itr, self._sampler.get_recent_paths(), eval_rollouts)
                 inference_itr += 1
                 eval_rollouts = []
 
-            ### load model
-            with self._rsync_lock: # to ensure the ckpt has been fully transferred over
-                new_train_itr = self._get_train_itr()
-                if train_itr < new_train_itr:
-                    logger.debug('Loading policy for itr {0}'.format(new_train_itr - 1))
-                    self._policy.restore(self._inference_policy_file_name(new_train_itr - 1), train=False)
-                    train_itr = new_train_itr
+                ### load model
+                with self._rsync_lock: # to ensure the ckpt has been fully transferred over
+                    new_train_itr = self._get_train_itr()
+                    if train_itr < new_train_itr:
+                        logger.debug('Loading policy for itr {0}'.format(new_train_itr - 1))
+                        try:
+                            self._policy.restore(self._inference_policy_file_name(new_train_itr - 1), train=False)
+                            train_itr = new_train_itr
+                        except:
+                            logger.debug('Failed to load model for itr {0}'.format(new_train_itr - 1))
+                            self._policy.restore(self._inference_policy_file_name(train_itr - 1), train=False)
+                            logger.debug('As backup, restored itr {0}'.format(train_itr - 1))
 
             ### update step
             inference_step += self._sampler.n_envs

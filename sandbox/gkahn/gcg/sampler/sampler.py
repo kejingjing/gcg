@@ -118,7 +118,7 @@ class RNNCriticSampler(object):
     ####################
 
     def add_rollouts(self, rollout_filenames, max_to_add=None):
-        step = 0
+        step = sum([len(replay_pool) for replay_pool in self._replay_pools])
         itr = 0
         replay_pools = itertools.cycle(self._replay_pools)
         done_adding = False
