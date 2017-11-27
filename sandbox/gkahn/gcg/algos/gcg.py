@@ -38,24 +38,24 @@ class GCG(RLAlgorithm):
             replay_pool_params=kwargs['replay_pool_params']
         )
 
-        self._eval_sampler = RNNCriticSampler(
-            policy=kwargs['policy'],
-            env=kwargs['env_eval'],
-            n_envs=1,
-            replay_pool_size=int(np.ceil(1.5 * kwargs['max_path_length']) + 1),
-            max_path_length=kwargs['max_path_length'],
-            sampling_method=kwargs['replay_pool_sampling'],
-            save_rollouts=True,
-            save_rollouts_observations=kwargs.get('save_eval_rollouts_observations', False),
-            save_env_infos=kwargs['save_env_infos'],
-            replay_pool_params=kwargs['replay_pool_params']
-        )
+        if kwargs['env_eval'] is not None:
+            self._eval_sampler = RNNCriticSampler(
+                policy=kwargs['policy'],
+                env=kwargs['env_eval'],
+                n_envs=1,
+                replay_pool_size=int(np.ceil(1.5 * kwargs['max_path_length']) + 1),
+                max_path_length=kwargs['max_path_length'],
+                sampling_method=kwargs['replay_pool_sampling'],
+                save_rollouts=True,
+                save_rollouts_observations=kwargs.get('save_eval_rollouts_observations', False),
+                save_env_infos=kwargs['save_env_infos'],
+                replay_pool_params=kwargs['replay_pool_params']
+            )
+        else:
+            self._eval_sampler = None
 
         if kwargs.get('offpolicy', None) is not None:
-            assert(os.path.exists(kwargs['offpolicy']))
-            logger.info('Loading offpolicy data from {0}'.format(kwargs['offpolicy']))
-            self._sampler.add_offpolicy(kwargs['offpolicy'], int(kwargs['num_offpolicy']))
-            logger.info('Added {0} samples'.format(len(self._sampler)))
+            self._add_offpolicy(kwargs['offpolicy'], max_to_add=kwargs['num_offpolicy'])
 
         alg_args = kwargs
         self._total_steps = int(alg_args['total_steps'])
@@ -129,6 +129,13 @@ class GCG(RLAlgorithm):
     ###############
     ### Restore ###
     ###############
+
+    def _add_offpolicy(self, folder, max_to_add):
+        assert (os.path.exists(folder))
+        logger.info('Loading offpolicy data from {0}'.format(folder))
+        rollout_filenames = [os.path.join(folder, fname) for fname in os.listdir(folder) if 'train_rollouts.pkl' in fname]
+        self._sampler.add_rollouts(rollout_filenames, max_to_add=max_to_add)
+        logger.info('Added {0} samples'.format(len(self._sampler)))
 
     def _get_train_itr(self):
         train_itr = 0
@@ -223,7 +230,7 @@ class GCG(RLAlgorithm):
                 timeit.stop('sample')
 
             ### sample and DON'T add to buffer (for validation)
-            if step > 0 and step % self._eval_every_n_steps == 0:
+            if self._eval_sampler is not None and step > 0 and step % self._eval_every_n_steps == 0:
                 timeit.start('eval')
                 eval_rollouts_step = []
                 eval_step = step

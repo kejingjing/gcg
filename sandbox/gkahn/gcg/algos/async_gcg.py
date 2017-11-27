@@ -38,13 +38,15 @@ class AsyncGCG(GCG):
     #####################
 
     def _rsync_thread(self):
+        only_exp_dir = os.path.join(*self._save_dir.split('/')[-2:]) # exp_prefix/exp_name
+
         while True:
             ### rsync for *_rollouts.pkl --> train
             send_rsync_cmd = "rsync -az -e 'ssh' --include='{0}' --exclude='*' '{1}' {2}:{3}".format(
                 '*_rollouts.pkl',
                 os.path.join(self._save_dir, ''),
                 self._ssh,
-                os.path.join(self._remote_dir, ''))
+                os.path.join(self._remote_dir, only_exp_dir, ''))
             send_retcode = os.system(send_rsync_cmd)
 
             ### rsync for train --> *_inference_policy.ckpt files
@@ -52,7 +54,7 @@ class AsyncGCG(GCG):
                 recv_rsync_cmd = "rsync -az -e 'ssh' --include='{0}' --exclude='*' {1}:{2} '{3}'".format(
                     '*_inference_policy.ckpt*',
                     self._ssh,
-                    os.path.join(self._remote_dir, ''),
+                    os.path.join(self._remote_dir, only_exp_dir, ''),
                     os.path.join(self._save_dir, '')
                 )
                 recv_ret_code = os.system(recv_rsync_cmd)
@@ -195,7 +197,7 @@ class AsyncGCG(GCG):
                 timeit.stop('sample')
 
             ### sample and DON'T add to buffer (for validation)
-            if inference_step > 0 and inference_step % self._eval_every_n_steps == 0:
+            if self._eval_sampler is not None and inference_step > 0 and inference_step % self._eval_every_n_steps == 0:
                 timeit.start('eval')
                 eval_rollouts_step = []
                 eval_step = inference_step
@@ -266,7 +268,10 @@ def create_async_gcg(params):
     env = create_env(env_str, is_normalize=normalize_env, seed=params['seed'])
 
     env_eval_str = params['alg'].pop('env_eval', env_str)
-    env_eval = create_env(env_eval_str, is_normalize=normalize_env, seed=params['seed'])
+    if env_eval_str is not None:
+        env_eval = create_env(env_eval_str, is_normalize=normalize_env, seed=params['seed'])
+    else:
+        env_eval = None
 
     env.reset()
     env_eval.reset()
@@ -318,6 +323,7 @@ def run_async_gcg_inference(params):
     params = copy.deepcopy(params)
     max_path_length = params['alg']['max_path_length']
     params['alg']['replay_pool_size'] = int(1.5 * max_path_length)
+    params['policy']['inference_only'] = True
 
     algo = create_async_gcg(params)
     algo.inference()

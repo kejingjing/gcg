@@ -210,33 +210,29 @@ class RNNCriticReplayPool(object):
                 values.insert(0, trace)
             self._values[indices] = values
 
-        ### update log stats
-        if update_log_stats and done:
-            self._update_log_stats()
+            ### update log stats
+            if update_log_stats:
+                self._update_log_stats()
+
+            self._last_done_index = self._index
 
     def store_rollout(self, start_step, rollout):
-        """ Directly store rollout (e.g. if loading in offpolicy data) """
-        r_len = len(rollout['dones'])
-        # update size first b/c indices depend on it
-        if self._index + r_len > self._size:
-            self._curr_size = self._size
-        else:
-            self._curr_size = max(self._curr_size, self._index + r_len)
-        indices = self._get_indices(self._index, (self._index + r_len) % self._size)
-        self._steps[indices] = list(range(start_step, start_step + r_len))
-        self._observations[indices, :] = rollout['observations']
-        self._actions[indices, :] = rollout['actions']
-        self._rewards[indices] = rollout['rewards']
-        self._dones[indices] = rollout['dones']
-        self._logprobs[indices] = rollout['logprobs']
-        # np.copyto(self._steps[indices], list(range(start_step, start_step + r_len)))
-        # np.copyto(self._observations[indices, :], rollout['observations'])
-        # np.copyto(self._actions[indices, :], rollout['actions'])
-        # np.copyto(self._rewards[indices], rollout['rewards'])
-        # np.copyto(self._dones[indices], rollout['dones'])
-        self._index = (self._index + r_len) % self._size
+        if not rollout['dones'][-1]:
+            # import IPython; IPython.embed()
+            print('NOT ENDING IN DONE')
+            return
+        # assert(rollout['dones'][-1])
 
-        self._last_done_index = self._index
+        r_len = len(rollout['dones'])
+        for i in range(r_len):
+            self.store_observation(start_step + i, rollout['observations'][i])
+            self.store_effect(rollout['actions'][i],
+                              rollout['rewards'][i],
+                              rollout['dones'][i],
+                              None,
+                              rollout['est_values'][i],
+                              rollout['logprobs'][i],
+                              update_log_stats=False)
 
     ########################
     ### Sample from pool ###
@@ -420,8 +416,6 @@ class RNNCriticReplayPool(object):
                 'values': self._values[indices],
                 'logprobs': self._logprobs[indices]
             })
-
-        self._last_done_index = self._index
 
     def get_log_stats(self):
         self._log_stats['Time'] = [time.time() - self._last_get_log_stats_time] if self._last_get_log_stats_time else [0.]

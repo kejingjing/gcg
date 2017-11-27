@@ -35,6 +35,7 @@ class MACPolicy(Parameterized, Serializable):
         self._obs_history_len = kwargs['obs_history_len'] # how many previous observations to use
 
         ### model architecture
+        self._inference_only = kwargs.get('inference_only', False)
         self._image_graph = kwargs['image_graph']
         self._observation_graph = kwargs['observation_graph']
         self._action_graph = kwargs['action_graph']
@@ -309,16 +310,17 @@ class MACPolicy(Parameterized, Serializable):
         return tf_actions
 
     def _graph_get_action(self, tf_obs_ph, get_action_params, scope_select, reuse_select, scope_eval, reuse_eval,
-                          tf_episode_timesteps_ph, N=None):
+                          tf_episode_timesteps_ph, for_target):
         """
         :param tf_obs_ph: [batch_size, obs_history_len, obs_dim]
         :param get_action_params: how to select actions
         :param scope_select: which scope to evaluate values (double Q-learning)
         :param scope_eval: which scope to select values (double Q-learning)
+        :param for_target: for use in the target network?
         :return: tf_get_action [batch_size, action_dim], tf_get_action_value [batch_size]
         """
         H = get_action_params['H']
-        N = self._N if N is None else N
+        N = self._N
         assert(H <= N)
         get_action_type = get_action_params['type']
         num_obs = tf.shape(tf_obs_ph)[0]
@@ -487,6 +489,79 @@ class MACPolicy(Parameterized, Serializable):
     def _graph_init_vars(self, tf_sess):
         tf_sess.run([xplatform.global_variables_initializer()])
 
+    def _graph_setup_policy(self, policy_scope, tf_obs_ph, tf_actions_ph):
+        ### policy
+        with tf.variable_scope(policy_scope):
+            ### create preprocess placeholders
+            tf_preprocess = self._graph_preprocess_placeholders()
+            ### process obs to lowd
+            tf_obs_lowd = self._graph_obs_to_lowd(tf_obs_ph, tf_preprocess, is_training=True)
+            ### create training policy
+            tf_train_values, tf_train_values_softmax, _, _ = \
+                self._graph_inference(tf_obs_lowd, tf_actions_ph[:, :self._H, :],
+                                      self._values_softmax, tf_preprocess, is_training=True)
+
+        with tf.variable_scope(policy_scope, reuse=True):
+            tf_train_values_test, tf_train_values_softmax_test, _, _ = \
+                self._graph_inference(tf_obs_lowd, tf_actions_ph[:, :self._get_action_test['H'], :],
+                                      self._values_softmax, tf_preprocess, is_training=False)
+            tf_get_value = tf.reduce_sum(tf_train_values_softmax_test * tf_train_values_test, reduction_indices=1)
+
+        return tf_preprocess, tf_train_values, tf_train_values_softmax, tf_get_value
+
+    def _graph_setup_action_selection(self, policy_scope, tf_obs_ph, tf_episode_timesteps_ph, tf_test_es_ph_dict):
+        ### action selection
+        tf_get_action, tf_get_action_value, tf_get_action_reset_ops = \
+            self._graph_get_action(tf_obs_ph, self._get_action_test,
+                                   policy_scope, True, policy_scope, True,
+                                   tf_episode_timesteps_ph, for_target=False)
+        ### exploration strategy and logprob
+        tf_get_action_explore = self._graph_get_action_explore(tf_get_action, tf_test_es_ph_dict)
+
+        return tf_get_action, tf_get_action_value, tf_get_action_reset_ops, tf_get_action_explore
+
+    def _graph_setup_target(self, policy_scope, tf_obs_target_ph, tf_train_values, tf_policy_vars):
+        ### create target network
+        if self._use_target:
+            target_scope = 'target' if self._separate_target_params else 'policy'
+            ### action selection
+            tf_obs_target_ph_packed = xplatform.concat([tf_obs_target_ph[:, h - self._obs_history_len:h, :]
+                                                        for h in range(self._obs_history_len,
+                                                                       self._obs_history_len + self._N + 1)],
+                                                       0)
+            tf_target_get_action, tf_target_get_action_values, _ = \
+                self._graph_get_action(tf_obs_target_ph_packed,
+                                       self._get_action_target,
+                                       scope_select=policy_scope,
+                                       reuse_select=True,
+                                       scope_eval=target_scope,
+                                       reuse_eval=(target_scope == policy_scope),
+                                       tf_episode_timesteps_ph=None, # TODO would need to fill in
+                                       for_target=True)
+
+            tf_target_get_action_values = tf.transpose(tf.reshape(tf_target_get_action_values, (self._N + 1, -1)))[:,
+                                          1:]
+        else:
+            tf_target_get_action_values = tf.zeros([tf.shape(tf_train_values)[0], self._N])
+
+        ### update target network
+        if self._use_target and self._separate_target_params:
+            tf_policy_vars_nobatchnorm = list(filter(lambda v: 'biased' not in v.name and 'local_step' not in v.name,
+                                                     tf_policy_vars))
+            tf_target_vars = sorted(tf.get_collection(xplatform.global_variables_collection_name(),
+                                                      scope=target_scope), key=lambda v: v.name)
+            assert (len(tf_policy_vars_nobatchnorm) == len(tf_target_vars))
+            tf_update_target_fn = []
+            for var, var_target in zip(tf_policy_vars_nobatchnorm, tf_target_vars):
+                assert (var.name.replace(policy_scope, '') == var_target.name.replace(target_scope, ''))
+                tf_update_target_fn.append(var_target.assign(var))
+            tf_update_target_fn = tf.group(*tf_update_target_fn)
+        else:
+            tf_target_vars = None
+            tf_update_target_fn = None
+
+        return tf_target_get_action_values, tf_target_vars, tf_update_target_fn
+
     def _graph_setup(self):
         ### create session and graph
         tf_sess = tf.get_default_session()
@@ -500,34 +575,17 @@ class MACPolicy(Parameterized, Serializable):
 
             ### create input output placeholders
             tf_obs_ph, tf_actions_ph, tf_dones_ph, tf_rewards_ph, tf_obs_target_ph, \
-                tf_test_es_ph_dict, tf_episode_timesteps_ph = self._graph_input_output_placeholders()
+            tf_test_es_ph_dict, tf_episode_timesteps_ph = self._graph_input_output_placeholders()
             self.global_step = tf.Variable(0, trainable=False, name='global_step')
 
-            ### policy
+            ### setup policy
             policy_scope = 'policy'
-            with tf.variable_scope(policy_scope):
-                ### create preprocess placeholders
-                tf_preprocess = self._graph_preprocess_placeholders()
-                ### process obs to lowd
-                tf_obs_lowd = self._graph_obs_to_lowd(tf_obs_ph, tf_preprocess, is_training=True)
-                ### create training policy
-                tf_train_values, tf_train_values_softmax, _, _ = \
-                    self._graph_inference(tf_obs_lowd, tf_actions_ph[:, :self._H, :],
-                                          self._values_softmax, tf_preprocess, is_training=True)
+            tf_preprocess, tf_train_values, tf_train_values_softmax, tf_get_value = \
+                self._graph_setup_policy(policy_scope, tf_obs_ph, tf_actions_ph)
 
-            with tf.variable_scope(policy_scope, reuse=True):
-                tf_train_values_test, tf_train_values_softmax_test, _, _ = \
-                    self._graph_inference(tf_obs_lowd, tf_actions_ph[:, :self._get_action_test['H'], :],
-                                          self._values_softmax, tf_preprocess, is_training=False)
-                tf_get_value = tf.reduce_sum(tf_train_values_softmax_test * tf_train_values_test, reduction_indices=1)
-
-            ### action selection
-            tf_get_action, tf_get_action_value, tf_get_action_reset_ops = \
-                self._graph_get_action(tf_obs_ph, self._get_action_test,
-                                       policy_scope, True, policy_scope, True,
-                                       tf_episode_timesteps_ph)
-            ### exploration strategy and logprob
-            tf_get_action_explore = self._graph_get_action_explore(tf_get_action, tf_test_es_ph_dict)
+            ### get action
+            tf_get_action, tf_get_action_value, tf_get_action_reset_ops, tf_get_action_explore = \
+                self._graph_setup_action_selection(policy_scope, tf_obs_ph, tf_episode_timesteps_ph, tf_test_es_ph_dict)
 
             ### get policy variables
             tf_policy_vars = sorted(tf.get_collection(xplatform.global_variables_collection_name(),
@@ -535,49 +593,21 @@ class MACPolicy(Parameterized, Serializable):
             tf_trainable_policy_vars = sorted(tf.get_collection(xplatform.trainable_variables_collection_name(),
                                                                 scope=policy_scope), key=lambda v: v.name)
 
-            ### create target network
-            if self._use_target:
-                target_scope = 'target' if self._separate_target_params else 'policy'
-                ### action selection
-                tf_obs_target_ph_packed = xplatform.concat([tf_obs_target_ph[:, h - self._obs_history_len:h, :]
-                                                     for h in range(self._obs_history_len, self._obs_history_len + self._N + 1)],
-                                                    0)
-                tf_target_get_action, tf_target_get_action_values, _ = self._graph_get_action(tf_obs_target_ph_packed,
-                                                                                              self._get_action_target,
-                                                                                              scope_select=policy_scope,
-                                                                                              reuse_select=True,
-                                                                                              scope_eval=target_scope,
-                                                                                              reuse_eval=(target_scope == policy_scope),
-                                                                                              tf_episode_timesteps_ph=None) # TODO would need to fill in
+            if not self._inference_only:
+                ### setup target
+                tf_target_get_action_values, tf_target_vars, tf_update_target_fn = \
+                    self._graph_setup_target(policy_scope, tf_obs_target_ph, tf_train_values, tf_policy_vars)
 
-                tf_target_get_action_values = tf.transpose(tf.reshape(tf_target_get_action_values, (self._N + 1, -1)))[:, 1:]
+                ### optimization
+                tf_cost, tf_mse = self._graph_cost(tf_train_values, tf_train_values_softmax, tf_rewards_ph, tf_dones_ph,
+                                                   tf_target_get_action_values)
+                tf_opt, tf_lr_ph = self._graph_optimize(tf_cost, tf_trainable_policy_vars)
             else:
-                tf_target_get_action_values = tf.zeros([tf.shape(tf_train_values)[0], self._N])
-
-            ### update target network
-            if self._use_target and self._separate_target_params:
-                tf_policy_vars_nobatchnorm= list(filter(lambda v: 'biased' not in v.name and 'local_step' not in v.name,
-                                                        tf_policy_vars))
-                tf_target_vars = sorted(tf.get_collection(xplatform.global_variables_collection_name(),
-                                                          scope=target_scope), key=lambda v: v.name)
-                assert(len(tf_policy_vars_nobatchnorm) == len(tf_target_vars))
-                tf_update_target_fn = []
-                for var, var_target in zip(tf_policy_vars_nobatchnorm, tf_target_vars):
-                    assert(var.name.replace(policy_scope, '') == var_target.name.replace(target_scope, ''))
-                    tf_update_target_fn.append(var_target.assign(var))
-                tf_update_target_fn = tf.group(*tf_update_target_fn)
-            else:
-                tf_target_vars = None
-                tf_update_target_fn = None
-
-            ### optimization
-            tf_cost, tf_mse = self._graph_cost(tf_train_values, tf_train_values_softmax, tf_rewards_ph, tf_dones_ph,
-                                               tf_target_get_action_values)
-            tf_opt, tf_lr_ph = self._graph_optimize(tf_cost, tf_trainable_policy_vars)
+                tf_target_vars = tf_update_target_fn = tf_cost = tf_mse = tf_opt = tf_lr_ph = None
 
             ### savers
             tf_saver_inference = tf.train.Saver(tf_policy_vars, max_to_keep=None)
-            tf_saver_train = tf.train.Saver(max_to_keep=None)
+            tf_saver_train = tf.train.Saver(max_to_keep=None) if not self._inference_only else None
 
             ### initialize
             self._graph_init_vars(tf_sess)
