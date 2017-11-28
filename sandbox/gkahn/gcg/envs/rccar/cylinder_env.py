@@ -32,7 +32,7 @@ class CylinderEnv(CarEnv):
         if self._fixed_speed:
             self.action_space = Box(low=np.array([-1., 1.]), high=np.array([1., 1.]))
         else:
-            self.action_space = Box(low=np.array([-1., 1.]), high=np.array([-1., 1.]))
+            self.action_space = Box(low=np.array([-1., -1.]), high=np.array([1., 1.]))
         self._unnormalized_action_space = Box(low=np.array([self._steer_limits[0], self._speed_limits[0]]),
                                               high=np.array([self._steer_limits[1], self._speed_limits[1]]))
 
