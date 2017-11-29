@@ -190,11 +190,20 @@ class AsyncGCG(GCG):
             ### sample and add to buffer
             if inference_step > self._sample_after_n_steps:
                 timeit.start('sample')
-                self._sampler.step(inference_step,
-                                   take_random_actions=(inference_step <= self._learn_after_n_steps or
-                                                        inference_step <= self._onpolicy_after_n_steps),
-                                   explore=True)
+                try:
+                    self._sampler.step(inference_step,
+                                       take_random_actions=(inference_step <= self._learn_after_n_steps or
+                                                            inference_step <= self._onpolicy_after_n_steps),
+                                       explore=True)
+                    inference_step += self._sampler.n_envs
+                except Exception as e:
+                    logger.warn('Sampler exception {0}'.format(str(e)))
+                    trashed_steps = self._sampler.trash_current_rollouts()
+                    inference_step -= trashed_steps
+                    logger.warn('Trashed {0} steps'.format(trashed_steps))
                 timeit.stop('sample')
+            else:
+                inference_step += self._sampler.n_envs
 
             ### sample and DON'T add to buffer (for validation)
             if self._eval_sampler is not None and inference_step > 0 and inference_step % self._eval_every_n_steps == 0:
@@ -225,6 +234,9 @@ class AsyncGCG(GCG):
 
             ### save rollouts / load model
             if inference_step > 0 and inference_step % self._inference_save_every_n_steps == 0:
+                ### reset to stop rollout
+                self._sampler.reset()
+
                 ### save rollouts
                 logger.debug('Saving files for itr {0}'.format(inference_itr))
                 self._save_inference(inference_itr, self._sampler.get_recent_paths(), eval_rollouts)
@@ -243,9 +255,6 @@ class AsyncGCG(GCG):
                             logger.debug('Failed to load model for itr {0}'.format(new_train_itr - 1))
                             self._policy.restore(self._inference_policy_file_name(train_itr - 1), train=False)
                             logger.debug('As backup, restored itr {0}'.format(train_itr - 1))
-
-            ### update step
-            inference_step += self._sampler.n_envs
 
         self._save_inference(inference_itr, self._sampler.get_recent_paths(), eval_rollouts)
 

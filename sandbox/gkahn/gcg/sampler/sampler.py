@@ -52,7 +52,7 @@ class RNNCriticSampler(object):
             envs=envs,
             max_path_length=max_path_length
         )
-        self._curr_observations = self._vec_env.reset()
+        self.reset()
 
     @property
     def n_envs(self):
@@ -113,12 +113,24 @@ class RNNCriticSampler(object):
 
         self._curr_observations = next_observations
 
+    def trash_current_rollouts(self):
+        """ In case an error happens """
+        steps_removed = 0
+        for replay_pool in self._replay_pools:
+            steps_removed += replay_pool.trash_current_rollout()
+        return steps_removed
+
+    def reset(self):
+        self._curr_observations = self._vec_env.reset()
+        for replay_pool in self._replay_pools:
+            replay_pool.force_done()
+
     ####################
     ### Add rollouts ###
     ####################
 
     def add_rollouts(self, rollout_filenames, max_to_add=None):
-        step = sum([len(replay_pool) for replay_pool in self._replay_pools])
+        step = sum([replay_pool.num_store_calls for replay_pool in self._replay_pools])
         itr = 0
         replay_pools = itertools.cycle(self._replay_pools)
         done_adding = False

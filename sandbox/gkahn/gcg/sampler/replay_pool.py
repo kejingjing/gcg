@@ -48,6 +48,7 @@ class RNNCriticReplayPool(object):
         self._sampling_indices = np.zeros((self._size,), dtype=bool)
         self._index = 0
         self._curr_size = 0
+        self._num_store_calls = 0
 
         ### keep track of statistics
         self._stats = defaultdict(int)
@@ -63,6 +64,10 @@ class RNNCriticReplayPool(object):
 
     def __len__(self):
         return self._curr_size
+
+    @property
+    def num_store_calls(self):
+        return self._num_store_calls
 
     def _get_indices(self, start, end):
         if start <= end:
@@ -166,6 +171,26 @@ class RNNCriticReplayPool(object):
     def encode_recent_observation(self):
         return self._encode_observation(self._index)
 
+    def _done_update(self, update_log_stats=True):
+        if self._last_done_index == self._index:
+            return
+
+        indices = self._get_indices(self._last_done_index, self._index)
+        rewards = self._rewards[indices]
+
+        trace = 0
+        values = []
+        for r in rewards[::-1]:
+            trace = r + self._gamma * trace
+            values.insert(0, trace)
+        self._values[indices] = values
+
+        ### update log stats
+        if update_log_stats:
+            self._update_log_stats()
+
+        self._last_done_index = self._index
+
     def store_effect(self, action, reward, done, env_info, est_value, logprob, flatten_action=True, update_log_stats=True):
         self._actions[self._index, :] = self._env_spec.action_space.flatten(action) if flatten_action else action
         self._rewards[self._index] = reward
@@ -197,24 +222,18 @@ class RNNCriticReplayPool(object):
             raise NotImplementedError
         self._index = (self._index + 1) % self._size
         self._curr_size = max(self._curr_size, self._index)
+        self._num_store_calls += 1
 
         ### compute values
         if done:
-            indices = self._get_indices(self._last_done_index, self._index)
-            rewards = self._rewards[indices]
+            self._done_update(update_log_stats=update_log_stats)
 
-            trace = 0
-            values = []
-            for r in rewards[::-1]:
-                trace = r + self._gamma * trace
-                values.insert(0, trace)
-            self._values[indices] = values
+    def force_done(self):
+        if len(self) == 0:
+            return
 
-            ### update log stats
-            if update_log_stats:
-                self._update_log_stats()
-
-            self._last_done_index = self._index
+        self._dones[(self._index - 1) % self._size] = True
+        self._done_update()
 
     def store_rollout(self, start_step, rollout):
         if not rollout['dones'][-1]:
@@ -233,6 +252,28 @@ class RNNCriticReplayPool(object):
                               rollout['est_values'][i],
                               rollout['logprobs'][i],
                               update_log_stats=False)
+
+    ########################
+    ### Remove from pool ###
+    ########################
+
+    def trash_current_rollout(self):
+        self._actions[self._last_done_index:self._index, :] = np.nan
+        self._rewards[self._last_done_index:self._index] = np.nan
+        self._dones[self._last_done_index:self._index] = True
+        self._env_infos[self._last_done_index:self._index] = np.object
+        self._est_values[self._last_done_index:self._index] = np.nan
+        self._values[self._last_done_index:self._index] = np.nan
+        self._logprobs[self._last_done_index:self._index] = np.nan
+        self._sampling_indices[self._last_done_index:self._index] = False
+
+        r_len = (self._index - self._last_done_index) % self._size
+        if self._curr_size < self._size - 1: # TODO: not sure this is right
+            self._curr_size -= r_len
+        self._index = self._last_done_index
+        self._num_store_calls -= r_len
+
+        return r_len
 
     ########################
     ### Sample from pool ###
