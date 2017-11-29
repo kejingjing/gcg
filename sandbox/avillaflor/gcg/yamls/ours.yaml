@@ -1,5 +1,5 @@
 exp_name: ours
-exp_prefix: sim_rccar_ori_output
+exp_prefix: sim_rccar_ori_output_new
 seed: 1
 
 #################
@@ -87,8 +87,8 @@ policy:
       lambda: 0.9
   use_target: False # target network?
   separate_target_params: True # if target network, separate parameters?
-  clip_cost_target_with_dones: False # if False, extends end of episodes by assuming 0 rewards and random actions taken
-  
+  clip_cost_target_with_dones: False
+
   get_action_test: # how to select actions at test time (i.e., when gathering samples)
     H: 16
     values_softmax:
@@ -162,42 +162,35 @@ policy:
   RCcarSensorsMACPolicy:
     <<: *idMACPolicy
     output_dim: 2
-#    action_value_fn: 'prob_heading' # prob_heading / prob_plus_heading
-#    action_value_alpha: [1.0, 1.0]
    
     action_value_terms:
-      - ori:
-        type: 'goal'
+      - type: 'goal'
         alpha: 1.0
         dim: 1
         pos: 1
         goal_pos: 0
         fn: 'cos'
         multiply: 'probnocoll' # / 'probnocoll' 
-      - probcoll:
-        type: 'probcoll'
+      - type: 'probnocoll'
         alpha: 1.0
         fn :
 #      - :
 #        type: 'u_cost'
-#        aplha: 1.0
+#        alpha: 1.0
+#        pos: 1
 #        dim: 1
 
     input_sensors:
-      - ori:
-        dim: 1
+      - dim: 1
         pos: 0
         use: "add"
         output_pos: 1 # Only needed if add
-        
-      - goal_ori:
-        dim: 1
+      - dim: 1
         pos: 1
         use: "goal"
 
     output_sensors:
-      - probcoll:
-        name: 'probcoll'
+      - name: 'probcoll'
         dim: 1
         pos: 0
         fn: 'sigmoid'
@@ -206,13 +199,11 @@ policy:
         goal: 'reward'
         goal_pos: 0
         clip_with_done: False
-      - orientation:
-        name: 'ori'
+      - name: 'ori'
         dim: 1
         pos: 1 # position in output
         fn: 
         scale: 1.0
-#        scale: 6.283185307179586 # 2pi  
         loss: 'mse'
         goal: 'obs_vec'
         goal_pos: 0 # position in obs_vec

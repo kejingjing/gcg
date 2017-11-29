@@ -377,8 +377,11 @@ class RCcarSensorsMACPolicy(MACPolicy, Serializable):
         tf_get_action_reset_ops = []
 
         ### check shapes
-        tf.assert_equal(tf.shape(tf_get_action)[0], num_obs)
-        tf.assert_equal(tf.shape(tf_get_action_value)[0], num_obs)
+        asserts = []
+        asserts.append(tf.assert_equal(tf.shape(tf_get_action)[0], num_obs))
+        asserts.append(tf.assert_equal(tf.shape(tf_get_action_value)[0], num_obs))
+        with tf.control_dependencies(asserts):
+            tf_get_action = tf.identity(tf_get_action)
         assert(tf_get_action.get_shape()[1].value == action_dim)
 
         return tf_get_action, tf_get_action_value, tf_get_action_reset_ops
@@ -491,13 +494,6 @@ class RCcarSensorsMACPolicy(MACPolicy, Serializable):
             return tf_get_action, tf_get_action_value, tf_get_action_reset_ops
 
     def _get_action_value(self, tf_actions, tf_mask, tf_graph_output_values, tf_goal_vec):
-#        if self._action_value_fn == 'prob_heading':
-#            return (1. - tf_graph_output_values[:, :, 0]) * ((tf.cos(tf_graph_output_values[:, :, 1] - tf_goal_vec[:, 0]) + 1.) / 2.)
-#        elif self._action_value_fn == 'prob_plus_heading':
-#            # TODO
-#            return - self._action_value_alpha[0] * tf_graph_output_values[:, :, 0] + self._action_value_alpha[1] * ((tf.cos(tf_graph_output_values[:, :, 1] - tf_goal_vec[:, 0]) + 1.) / 2.)
-#        else:
-#            raise NotImplementedError
         tf_mask = tf.expand_dims(tf_mask, axis=2)
         value = 0.
         for action_value_term in self._action_value_terms:
@@ -508,12 +504,14 @@ class RCcarSensorsMACPolicy(MACPolicy, Serializable):
                 tf_fn = tf.square
             elif fn == 'cos':
                 tf_fn = lambda x: (tf.cos(x) + 1.) / 2.
+            elif fn == 'shift':
+                tf_fn = lambda x: (x + 1.) / 2.
             elif fn is None:
                 tf_fn = tf.identity
             else:
                 raise NotImplementedError
-            if ty == 'probcoll':
-                fv_value = tf_fn(1. - tf_graph_output_values[:, :, 0:1])
+            if ty == 'probnocoll':
+                fn_value = tf_fn(1. - tf_graph_output_values[:, :, 0:1])
                 value += alpha * tf.reduce_sum(tf_mask * fn_value, axis=[1, 2]) 
             else:
                 dim = action_value_term.get('dim')
@@ -528,7 +526,6 @@ class RCcarSensorsMACPolicy(MACPolicy, Serializable):
                 else:
                     raise NotImplementedError
                 if ty == 'goal':
-
                     goal_pos = action_value_term.get('goal_pos')
                     goal = tf.expand_dims(tf_goal_vec[:, goal_pos:goal_pos+dim], axis=1)
                     val = tf_graph_output_values[:, :, pos:pos+dim]

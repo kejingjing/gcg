@@ -42,7 +42,6 @@ class RoomClutteredEnv(SquareEnv):
     def _get_observation(self):
         im, vec = super(RoomClutteredEnv, self)._get_observation()
 
-#        goal = np.array([0.0])
         vec = np.hstack([vec, self._goal_heading])
         return im, vec
 
@@ -76,8 +75,6 @@ class RoomClutteredEnv(SquareEnv):
         goals = []
         for pos in self._default_restart_pos():
             goal = pos[3] * pi / 180.0
-#            if goal > pi:
-#                goal = goal - (2 * pi)
             goals.append(goal)
         return goals
 
