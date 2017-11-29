@@ -3,12 +3,12 @@ import itertools
 import numpy as np
 
 from rllab.misc.ext import get_seed
-from rllab.envs.gym_env import GymEnv
 
 try:
+    from rllab.envs.gym_env import GymEnv
     import gym_ple
 except:
-    pass
+    GymEnv = None
 
 from sandbox.rocky.tf.envs.vec_env_executor import VecEnvExecutor
 
@@ -45,7 +45,7 @@ class RNNCriticSampler(object):
             envs = [create_env(env_str) for _ in range(self._n_envs)] if self._n_envs > 1 else [env]
         ### need to seed each environment if it is GymEnv
         seed = get_seed()
-        if seed is not None and isinstance(utils.inner_env(env), GymEnv):
+        if seed is not None and GymEnv is not None and isinstance(utils.inner_env(env), GymEnv):
             for i, env in enumerate(envs):
                 utils.inner_env(env).env.seed(seed + i)
         self._vec_env = VecEnvExecutor(

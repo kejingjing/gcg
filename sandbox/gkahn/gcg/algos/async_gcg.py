@@ -275,15 +275,14 @@ def create_async_gcg(params):
 
     env_str = params['alg'].pop('env')
     env = create_env(env_str, is_normalize=normalize_env, seed=params['seed'])
-
+    env.reset()
+    
     env_eval_str = params['alg'].pop('env_eval', env_str)
     if env_eval_str is not None:
         env_eval = create_env(env_eval_str, is_normalize=normalize_env, seed=params['seed'])
+        env_eval.reset()
     else:
         env_eval = None
-
-    env.reset()
-    env_eval.reset()
 
     #####################
     ### Create policy ###

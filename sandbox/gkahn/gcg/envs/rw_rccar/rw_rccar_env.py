@@ -1,7 +1,7 @@
 import os
 
 import numpy as np
-import cv2
+#import cv2
 
 from rllab.envs.base import Env
 from rllab.spaces.box import Box
@@ -54,7 +54,7 @@ class RolloutRosbag:
         for topic in topics:
             self.write(topic, msg_dict.get(topic), stamp_dict.get(topic))
 
-    def _close_rosbag(self):
+    def close(self):
         assert (self._rosbag is not None)
 
         self._rosbag.close()
@@ -62,7 +62,7 @@ class RolloutRosbag:
         self._last_write = None
 
 
-class RWrccarEnv(Env):
+class RWrccarEnv:
 
     def __init__(self, params={}):
         params.setdefault('dt', 0.25)
@@ -120,7 +120,7 @@ class RWrccarEnv(Env):
         self._ros_msgs = dict()
         self._ros_msg_times = dict()
         for topic, type in self._ros_topics_and_types.items():
-            rospy.Subscriber(self._ros_namespace + topic, type, (topic,))
+            rospy.Subscriber(self._ros_namespace + topic, type, self._ros_callback, (topic,))
         self._ros_steer_pub = rospy.Publisher(self._ros_namespace + 'cmd/steer', std_msgs.msg.Float32, queue_size=10)
         self._ros_vel_pub = rospy.Publisher(self._ros_namespace + 'cmd/vel', std_msgs.msg.Float32, queue_size=10)
 
@@ -146,7 +146,7 @@ class RWrccarEnv(Env):
         return im
 
     def _get_speed(self):
-        return self._ros_msgs['encoder/both']
+        return self._ros_msgs['encoder/both'].data
 
     def _get_reward(self):
         reward = self._collision_reward if self._is_collision else self._get_speed()
@@ -191,9 +191,9 @@ class RWrccarEnv(Env):
 
         self._ros_rolloutbag.close()
 
-        if self._ros_msgs['collision/flip']:
+        if self._ros_msgs['collision/flip'].data:
             logger.warn('Car has flipped, please unflip it to continue')
-            while self._ros_msgs['collision/flip']:
+            while self._ros_msgs['collision/flip'].data:
                 rospy.sleep(0.1)
             logger.warn('Car is now unflipped. Continuing...')
             rospy.sleep(1.)
@@ -212,7 +212,7 @@ class RWrccarEnv(Env):
         self._ros_rolloutbag.open()
 
         assert (self._ros_is_good)
-
+        
     ###########
     ### ROS ###
     ###########
@@ -231,11 +231,14 @@ class RWrccarEnv(Env):
         # check that all not commands are coming in at a continuous rate
         for topic in self._ros_topics_and_types.keys():
             if 'cmd' not in topic:
-                if (rospy.Time.now() - self._ros_msg_times[topic]).to_sec() > self._dt:
+                elapsed = (rospy.Time.now() - self._ros_msg_times[topic]).to_sec()
+                if elapsed > self._dt:
+                    logger.debug('Topic {0} was received {1} seconds ago (dt is {2}'.format(topic, elapsed, self._dt))
                     return False
 
         # check if in python mode
-        if self._ros_msgs.get('mode') is None or self._ros_msgs['mode'] != 2:
+        if self._ros_msgs.get('mode') is None or self._ros_msgs['mode'].data != 2:
+            logger.debug('In mode {0}'.format(self._ros_msgs.get('mode')))
             return False
 
         return True

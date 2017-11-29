@@ -1,9 +1,12 @@
 import numpy as np
 import scipy
 import scipy.signal
-import theano.tensor.nnet
-import theano.tensor as TT
-import theano.tensor.extra_ops
+try:
+    import theano.tensor.nnet
+    import theano.tensor as TT
+    import theano.tensor.extra_ops
+except:
+    pass
 from collections import OrderedDict
 
 
