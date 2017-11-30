@@ -54,7 +54,6 @@ class RNNCriticSampler(object):
             envs=envs,
             max_path_length=max_path_length
         )
-        self.reset()
 
     @property
     def n_envs(self):
