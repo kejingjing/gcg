@@ -1,5 +1,4 @@
 import os, glob
-import joblib
 import numpy as np
 
 from rllab.algos.base import RLAlgorithm
@@ -13,6 +12,7 @@ from sandbox.gkahn.gcg.policies.rccar_mac_policy import RCcarMACPolicy
 from sandbox.gkahn.gcg.sampler.sampler import RNNCriticSampler
 from sandbox.gkahn.gcg.utils.utils import timeit
 from sandbox.gkahn.gcg.utils import logger
+from sandbox.gkahn.gcg.utils import mypickle
 
 class GCG(RLAlgorithm):
 
@@ -102,11 +102,11 @@ class GCG(RLAlgorithm):
 
     def _save_train_rollouts(self, itr, rollouts):
         fname = self._train_rollouts_file_name(itr)
-        joblib.dump({'rollouts': rollouts}, fname, compress=3)
+        mypickle.dump({'rollouts': rollouts}, fname)
 
     def _save_eval_rollouts(self, itr, rollouts):
         fname = self._eval_rollouts_file_name(itr)
-        joblib.dump({'rollouts': rollouts}, fname, compress=3)
+        mypickle.dump({'rollouts': rollouts}, fname)
 
     def _save_train_policy(self, itr):
         self._policy.save(self._train_policy_file_name(itr), train=True)

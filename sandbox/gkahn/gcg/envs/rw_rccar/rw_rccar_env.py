@@ -2,6 +2,8 @@ import os
 
 import numpy as np
 #import cv2
+from PIL import Image
+from io import BytesIO
 
 from rllab.envs.base import Env
 from rllab.spaces.box import Box
@@ -132,17 +134,16 @@ class RWrccarEnv:
     def _get_observation(self):
         ### ROS --> np
         msg = self._ros_msgs['camera/image_raw/compressed']
-        np_arr = np.fromstring(msg.data, np.uint8)
-        image_color = cv2.imdecode(np_arr, cv2.CV_LOAD_IMAGE_COLOR) # BGR
 
-        ### color --> grayscale
-        def rgb2gray(rgb):
-            return np.dot(rgb[..., :3], [0.299, 0.587, 0.114])
+        # .03 seconds to do all below
 
-        image = rgb2gray(image_color)
-        im = cv2.resize(image, self.observation_space.shape, interpolation=cv2.INTER_AREA)
-        im = im.astype(np.uint8)
-
+        recon_pil_jpg = BytesIO(msg.data)
+        recon_pil_arr = Image.open(recon_pil_jpg)
+        
+        grayscale = recon_pil_arr.convert('L')
+        grayscale_resized = grayscale.resize(self.observation_space.shape, Image.ANTIALIAS)
+        im = np.array(grayscale_resized)
+        
         return im
 
     def _get_speed(self):
@@ -173,15 +174,16 @@ class RWrccarEnv:
         self._set_steer(cmd_steer)
         self._set_vel(cmd_vel)
 
-        rospy.sleep(max(0., self._dt - (rospy.Time.now() - self._last_step_time).to_sec()))
-
         next_observation = self._get_observation()
         reward = self._get_reward()
         done = self._get_done()
         env_info = dict()
 
+        done = (np.random.random() < 0.1) # TODO
+
         self._ros_rolloutbag.write_all(self._ros_topics_and_types.keys(), self._ros_msgs, self._ros_msg_times)
 
+        rospy.sleep(max(0., self._dt - (rospy.Time.now() - self._last_step_time).to_sec()))
         self._last_step_time = rospy.Time.now()
 
         return next_observation, reward, done, env_info
@@ -212,6 +214,8 @@ class RWrccarEnv:
         self._ros_rolloutbag.open()
 
         assert (self._ros_is_good)
+
+        return self._get_observation()
         
     ###########
     ### ROS ###
@@ -230,10 +234,10 @@ class RWrccarEnv:
     def _ros_is_good(self):
         # check that all not commands are coming in at a continuous rate
         for topic in self._ros_topics_and_types.keys():
-            if 'cmd' not in topic:
+            if 'cmd' not in topic and 'collision' not in topic:
                 elapsed = (rospy.Time.now() - self._ros_msg_times[topic]).to_sec()
                 if elapsed > self._dt:
-                    logger.debug('Topic {0} was received {1} seconds ago (dt is {2}'.format(topic, elapsed, self._dt))
+                    logger.debug('Topic {0} was received {1} seconds ago (dt is {2})'.format(topic, elapsed, self._dt))
                     return False
 
         # check if in python mode

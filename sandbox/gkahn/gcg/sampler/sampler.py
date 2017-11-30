@@ -1,4 +1,4 @@
-import os, pickle, joblib
+import os, pickle
 import itertools
 import numpy as np
 
@@ -17,6 +17,8 @@ from sandbox.gkahn.gcg.utils import utils
 from sandbox.gkahn.gcg.envs.env_utils import create_env
 from sandbox.rocky.tf.spaces.discrete import Discrete
 from sandbox.rocky.tf.spaces.box import Box
+from sandbox.gkahn.gcg.utils import logger
+from sandbox.gkahn.gcg.utils import mypickle
 
 class RNNCriticSampler(object):
     def __init__(self, policy, env, n_envs, replay_pool_size, max_path_length, sampling_method,
@@ -136,7 +138,7 @@ class RNNCriticSampler(object):
         done_adding = False
 
         for fname in rollout_filenames:
-            rollouts = joblib.load(fname)['rollouts']
+            rollouts = mypickle.load(fname)['rollouts']
             itr += 1
 
             for rollout, replay_pool in zip(rollouts, replay_pools):

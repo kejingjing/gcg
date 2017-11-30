@@ -201,6 +201,7 @@ class AsyncGCG(GCG):
                     trashed_steps = self._sampler.trash_current_rollouts()
                     inference_step -= trashed_steps
                     logger.warn('Trashed {0} steps'.format(trashed_steps))
+                    input('Press enter to continue')
                 timeit.stop('sample')
             else:
                 inference_step += self._sampler.n_envs
@@ -217,20 +218,21 @@ class AsyncGCG(GCG):
                 eval_rollouts += eval_rollouts_step
                 timeit.stop('eval')
 
-                ### log
-                if inference_step % self._log_every_n_steps == 0:
-                    logger.info('train itr {0:04d} inference itr {1:04d}'.format(train_itr, inference_itr))
-                    rllab_logger.record_tabular('Train step', train_step)
-                    rllab_logger.record_tabular('Inference step', inference_step)
-                    self._sampler.log()
+            ### log
+            if inference_step % self._log_every_n_steps == 0:
+                logger.info('train itr {0:04d} inference itr {1:04d}'.format(train_itr, inference_itr))
+                rllab_logger.record_tabular('Train step', train_step)
+                rllab_logger.record_tabular('Inference step', inference_step)
+                self._sampler.log()
+                if self._eval_sampler:
                     self._eval_sampler.log(prefix='Eval')
-                    tabular_str = rllab_logger.dump_tabular(with_prefix=False, is_print=False)
-                    for l in tabular_str.split('\n'):
-                        logger.debug(l)
-                    timeit.stop('total')
-                    logger.debug('\n' + str(timeit))
-                    timeit.reset()
-                    timeit.start('total')
+                tabular_str = rllab_logger.dump_tabular(with_prefix=False, is_print=False)
+                for l in tabular_str.split('\n'):
+                    logger.debug(l)
+                timeit.stop('total')
+                logger.debug('\n' + str(timeit))
+                timeit.reset()
+                timeit.start('total')
 
             ### save rollouts / load model
             if inference_step > 0 and inference_step % self._inference_save_every_n_steps == 0:
