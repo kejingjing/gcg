@@ -3,8 +3,11 @@ from rllab.misc.ext import set_seed
 import gym
 from sandbox.rocky.tf.envs.base import TfEnv
 from rllab.envs.normalized_env import normalize
-from sandbox.gkahn.rnn_critic.envs.atari_wrappers import wrap_deepmind
-from sandbox.gkahn.rnn_critic.envs.pygame_wrappers import wrap_pygame
+try:
+    from sandbox.gkahn.rnn_critic.envs.atari_wrappers import wrap_deepmind
+    from sandbox.gkahn.rnn_critic.envs.pygame_wrappers import wrap_pygame
+except:
+    pass
 
 def create_env(env_str, is_normalize=True, seed=None):
     from rllab.envs.gym_env import GymEnv, FixedIntervalVideoSchedule

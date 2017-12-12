@@ -14,23 +14,26 @@ from analyze_experiment import AnalyzeRNNCritic
 from sandbox.gkahn.rnn_critic.utils.utils import DataAverageInterpolation
 
 from sandbox.gkahn.rnn_critic.policies.mac_policy import MACPolicy
-from robots.sim_rccar.analysis.analyze_sim_rccar import AnalyzeSimRCcar
+# from robots.sim_rccar.analysis.analyze_sim_rccar import AnalyzeSimRCcar
 
-EXP_FOLDER = '/media/gkahn/ExtraDrive1/rllab/s3/rnn-critic'
-SAVE_FOLDER = '/media/gkahn/ExtraDrive1/rllab/rnn_critic/final_plots'
+# EXP_FOLDER = '/media/gkahn/ExtraDrive1/rllab/s3/rnn-critic'
+# SAVE_FOLDER = '/media/gkahn/ExtraDrive1/rllab/rnn_critic/final_plots'
+
+EXP_FOLDER = '/home/gkahn/code/rllab/data/local/sim-rccar'
+SAVE_FOLDER = '/home/gkahn/code/rllab/data/local/sim-rccar/final_plots'
 
 ########################
 ### Load experiments ###
 ########################
 
-def load_experiments(indices, create_new_envs=False, load_eval_rollouts=True):
+def load_experiments(indices, create_new_envs=False, load_train_rollouts=False, load_eval_rollouts=True):
     exps = []
     for i in indices:
         try:
             exps.append(AnalyzeRNNCritic(os.path.join(EXP_FOLDER, 'rccar{0:03d}'.format(i)),
                                          clear_obs=True,
                                          create_new_envs=create_new_envs,
-                                         load_train_rollouts=False,
+                                         load_train_rollouts=load_train_rollouts,
                                          load_eval_rollouts=load_eval_rollouts))
             print(i)
         except:
@@ -3191,10 +3194,17 @@ def plot_cluttered_hallway_lifelong_standalone():
     matplotlib.rc('font', **font)
 
     FILE_NAME = 'rccar_paper_cluttered_hallway_lifelong_standalone'
-    exp_nums = (2499, 2499 + 3, 2737)
-    all_exps = [load_experiments(range(i, i + 3), load_eval_rollouts=False) for i in exp_nums]
-    titles = ['Double\nQ-learning', '5-step Double\nQ-learning', 'Our\napproach']
-    colors = ['k', 'm', 'g']
+    all_exps = []
+    all_exps.append(load_experiments(range(2499, 2499 + 3), load_train_rollouts=False, load_eval_rollouts=False))
+    all_exps.append(load_experiments(range(2502, 2502 + 3), load_train_rollouts=False, load_eval_rollouts=False))
+    all_exps += [[AnalyzeRNNCritic(os.path.join(EXP_FOLDER, name),
+                                 clear_obs=True,
+                                 create_new_envs=False,
+                                 load_train_rollouts=False,
+                                 load_eval_rollouts=False) for name in ('nstep16_dql', 'nstep16_dql_second')]]
+    all_exps.append(load_experiments(range(2737, 2737 + 3), load_train_rollouts=False, load_eval_rollouts=False))
+    titles = ['Double\nQ-learning', '5-step Double\nQ-learning', '16-step Double\nQ-learning', 'Our\napproach']
+    colors = ['k', 'm', 'r', 'g']
 
     f_cumreward, axes_cumreward = plt.subplots(1, 1, figsize=(6, 3), sharey=False, sharex=True)
     if not hasattr(axes_cumreward, '__len__'):
@@ -3216,7 +3226,10 @@ def plot_cluttered_hallway_lifelong_standalone():
         ax.set_yticklabels([''] * len(ax.get_yticklabels()))
         ax.yaxis.set_ticks_position('both')
 
-        ax.legend(ncol=len(all_exps), loc='upper center', bbox_to_anchor=(0.5, 1.4))
+        # leg = ax.legend(ncol=len(all_exps), loc='upper center', bbox_to_anchor=(0.5, 1.3), columnspacing=1., fontsize=13)
+        leg = ax.legend(ncol=1, loc='upper center', bbox_to_anchor=(1.4, 1.), columnspacing=1., handlelength=1.)
+        for legobj in leg.legendHandles:
+            legobj.set_linewidth(4.0)
 
     f_cumreward.text(0.5, -0.05, 'Time (hours)', ha='center', fontdict=font)
 
@@ -3328,6 +3341,6 @@ def plot_cluttered_hallway_lifelong_standalone_release():
 # plot_dd_cluttered_hallway_lifelong_horizon()
 # plot_dd_cluttered_hallway_lifelong_bootstrapping()
 
-# plot_cluttered_hallway_lifelong_standalone()
+plot_cluttered_hallway_lifelong_standalone()
 
-plot_cluttered_hallway_lifelong_standalone_release()
+# plot_cluttered_hallway_lifelong_standalone_release()

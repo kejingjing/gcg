@@ -1,5 +1,5 @@
 import tensorflow as tf
-assert(tf.__version__ == '1.2.1' or tf.__version__ == '0.12.1' or tf.__version__ == '0.11.0')
+# assert(tf.__version__ == '1.2.1' or tf.__version__ == '0.12.1' or tf.__version__ == '0.11.0')
 
 def global_variables_initializer():
     if tf.__version__ == '1.2.1' or tf.__version__ == '0.12.1':
