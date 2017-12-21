@@ -12,7 +12,7 @@ except:
 
 from sandbox.rocky.tf.envs.vec_env_executor import VecEnvExecutor
 
-from sandbox.gkahn.gcg.sampler.replay_pool import RNNCriticReplayPool
+from sandbox.gkahn.gcg.sampler.replay_pool import ReplayPool
 from sandbox.gkahn.gcg.utils import utils
 from sandbox.gkahn.gcg.envs.env_utils import create_env
 from sandbox.rocky.tf.spaces.discrete import Discrete
@@ -20,7 +20,7 @@ from sandbox.rocky.tf.spaces.box import Box
 from sandbox.gkahn.gcg.utils import logger
 from sandbox.gkahn.gcg.utils import mypickle
 
-class RNNCriticSampler(object):
+class Sampler(object):
     def __init__(self, policy, env, n_envs, replay_pool_size, max_path_length, sampling_method,
                  save_rollouts=False, save_rollouts_observations=True, save_env_infos=False, env_str=None, replay_pool_params={}):
         self._policy = policy
@@ -28,17 +28,17 @@ class RNNCriticSampler(object):
 
         assert(self._n_envs == 1) # b/c policy reset
 
-        self._replay_pools = [RNNCriticReplayPool(env.spec,
-                                                  env.horizon,
-                                                  policy.N,
-                                                  policy.gamma,
-                                                  replay_pool_size // n_envs,
-                                                  obs_history_len=policy.obs_history_len,
-                                                  sampling_method=sampling_method,
-                                                  save_rollouts=save_rollouts,
-                                                  save_rollouts_observations=save_rollouts_observations,
-                                                  save_env_infos=save_env_infos,
-                                                  replay_pool_params=replay_pool_params)
+        self._replay_pools = [ReplayPool(env.spec,
+                                         env.horizon,
+                                         policy.N,
+                                         policy.gamma,
+                                         replay_pool_size // n_envs,
+                                         obs_history_len=policy.obs_history_len,
+                                         sampling_method=sampling_method,
+                                         save_rollouts=save_rollouts,
+                                         save_rollouts_observations=save_rollouts_observations,
+                                         save_env_infos=save_env_infos,
+                                         replay_pool_params=replay_pool_params)
                               for _ in range(n_envs)]
 
         try:
@@ -65,7 +65,7 @@ class RNNCriticSampler(object):
 
     @property
     def statistics(self):
-        return RNNCriticReplayPool.statistics_pools(self._replay_pools)
+        return ReplayPool.statistics_pools(self._replay_pools)
 
     def __len__(self):
         return sum([len(rp) for rp in self._replay_pools])
@@ -166,7 +166,7 @@ class RNNCriticSampler(object):
         return np.any([replay_pool.can_sample() for replay_pool in self._replay_pools])
 
     def sample(self, batch_size):
-        return RNNCriticReplayPool.sample_pools(self._replay_pools, batch_size,
+        return ReplayPool.sample_pools(self._replay_pools, batch_size,
                                                 only_completed_episodes=self._policy.only_completed_episodes)
 
     ###############
@@ -174,8 +174,8 @@ class RNNCriticSampler(object):
     ###############
 
     def log(self, prefix=''):
-        RNNCriticReplayPool.log_pools(self._replay_pools, prefix=prefix)
+        ReplayPool.log_pools(self._replay_pools, prefix=prefix)
 
     def get_recent_paths(self):
-        return RNNCriticReplayPool.get_recent_paths_pools(self._replay_pools)
+        return ReplayPool.get_recent_paths_pools(self._replay_pools)
 

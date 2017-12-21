@@ -19,10 +19,10 @@ def create_env(env_str, is_normalize=True, seed=None):
     except:
         logger.debug('Unable to import sim rccar')
 
-    #try:
-    from sandbox.gkahn.gcg.envs.rw_rccar.rw_rccar_env import RWrccarEnv
-    #except:
-    #    logger.debug('Unable to import rw rccar')
+    try:
+        from sandbox.gkahn.gcg.envs.rw_rccar.rw_rccar_env import RWrccarEnv
+    except:
+       logger.debug('Unable to import rw rccar')
 
     inner_env = eval(env_str)
     if is_normalize:

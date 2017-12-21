@@ -11,11 +11,14 @@ from rllab.misc import logger as rllab_logger
 
 from sandbox.gkahn.gcg.utils import logger
 
-import rospy
-import rosbag
-import std_msgs.msg
-import geometry_msgs.msg
-import sensor_msgs.msg
+try:
+    import rospy
+    import rosbag
+    import std_msgs.msg
+    import geometry_msgs.msg
+    import sensor_msgs.msg
+except:
+    logger.warn('ROS not imported')
 
 class RolloutRosbag:
 
@@ -77,6 +80,7 @@ class RWrccarEnv:
         params.setdefault('backup_speed', -0.2)
         params.setdefault('backup_duration', 1.)
         params.setdefault('backup_steer_range', (-0.1, 0.1))
+        params.setdefault('use_ros', True)
 
         self._dt = params['dt']
         self.horizon = params['horizon']
@@ -93,43 +97,44 @@ class RWrccarEnv:
         self._backup_steer_range = params['backup_steer_range']
 
         ### ROS
-        rospy.init_node('RWrccarEnv', anonymous=True)
-        rospy.sleep(1)
+        if params['use_ros']:
+            rospy.init_node('RWrccarEnv', anonymous=True)
+            rospy.sleep(1)
 
-        self._ros_namespace = params['ros_namespace']
-        self._ros_topics_and_types = dict([
-            ('camera/image_raw/compressed', sensor_msgs.msg.CompressedImage),
-            ('mode', std_msgs.msg.Int32),
-            ('steer', std_msgs.msg.Float32),
-            ('motor', std_msgs.msg.Float32),
-            ('battery/a', std_msgs.msg.Float32),
-            ('battery/b', std_msgs.msg.Float32),
-            ('battery/low', std_msgs.msg.Int32),
-            ('encoder/left', std_msgs.msg.Float32),
-            ('encoder/right', std_msgs.msg.Float32),
-            ('encoder/both', std_msgs.msg.Float32),
-            ('orientation/quat', geometry_msgs.msg.Quaternion),
-            ('orientation/rpy', geometry_msgs.msg.Vector3),
-            ('imu', geometry_msgs.msg.Accel),
-            ('collision/all', std_msgs.msg.Int32),
-            ('collision/flip', std_msgs.msg.Int32),
-            ('collision/jolt', std_msgs.msg.Int32),
-            ('collision/stuck', std_msgs.msg.Int32),
-            ('cmd/steer', std_msgs.msg.Float32),
-            ('cmd/motor', std_msgs.msg.Float32),
-            ('cmd/vel', std_msgs.msg.Float32)
-        ])
-        self._ros_msgs = dict()
-        self._ros_msg_times = dict()
-        for topic, type in self._ros_topics_and_types.items():
-            rospy.Subscriber(self._ros_namespace + topic, type, self._ros_callback, (topic,))
-        self._ros_steer_pub = rospy.Publisher(self._ros_namespace + 'cmd/steer', std_msgs.msg.Float32, queue_size=10)
-        self._ros_vel_pub = rospy.Publisher(self._ros_namespace + 'cmd/vel', std_msgs.msg.Float32, queue_size=10)
+            self._ros_namespace = params['ros_namespace']
+            self._ros_topics_and_types = dict([
+                ('camera/image_raw/compressed', sensor_msgs.msg.CompressedImage),
+                ('mode', std_msgs.msg.Int32),
+                ('steer', std_msgs.msg.Float32),
+                ('motor', std_msgs.msg.Float32),
+                ('battery/a', std_msgs.msg.Float32),
+                ('battery/b', std_msgs.msg.Float32),
+                ('battery/low', std_msgs.msg.Int32),
+                ('encoder/left', std_msgs.msg.Float32),
+                ('encoder/right', std_msgs.msg.Float32),
+                ('encoder/both', std_msgs.msg.Float32),
+                ('orientation/quat', geometry_msgs.msg.Quaternion),
+                ('orientation/rpy', geometry_msgs.msg.Vector3),
+                ('imu', geometry_msgs.msg.Accel),
+                ('collision/all', std_msgs.msg.Int32),
+                ('collision/flip', std_msgs.msg.Int32),
+                ('collision/jolt', std_msgs.msg.Int32),
+                ('collision/stuck', std_msgs.msg.Int32),
+                ('cmd/steer', std_msgs.msg.Float32),
+                ('cmd/motor', std_msgs.msg.Float32),
+                ('cmd/vel', std_msgs.msg.Float32)
+            ])
+            self._ros_msgs = dict()
+            self._ros_msg_times = dict()
+            for topic, type in self._ros_topics_and_types.items():
+                rospy.Subscriber(self._ros_namespace + topic, type, self._ros_callback, (topic,))
+            self._ros_steer_pub = rospy.Publisher(self._ros_namespace + 'cmd/steer', std_msgs.msg.Float32, queue_size=10)
+            self._ros_vel_pub = rospy.Publisher(self._ros_namespace + 'cmd/vel', std_msgs.msg.Float32, queue_size=10)
 
-        self._ros_rolloutbag = RolloutRosbag()
-        self._ros_rolloutbag.open()
+            self._ros_rolloutbag = RolloutRosbag()
+            self._ros_rolloutbag.open()
 
-        rospy.sleep(1)
+            rospy.sleep(1)
 
     def _get_observation(self):
         ### ROS --> np

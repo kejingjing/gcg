@@ -761,6 +761,19 @@ class MACPolicy(Parameterized, Serializable):
     def terminate(self):
         self._tf_dict['sess'].close()
 
+    #####################
+    ### Model methods ###
+    #####################
+
+    def get_model_outputs(self, observations, actions):
+        feed_dict = {
+            self._tf_dict['obs_ph']: observations,
+            self._tf_dict['actions_ph']: actions
+        }
+        outputs = self._tf_dict['sess'].run(self._tf_dict['get_value'], feed_dict=feed_dict)
+
+        return outputs
+
     ######################
     ### Saving/loading ###
     ######################

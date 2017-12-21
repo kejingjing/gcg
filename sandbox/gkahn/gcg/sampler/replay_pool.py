@@ -7,7 +7,7 @@ import rllab.misc.logger as rllab_logger
 
 from sandbox.gkahn.gcg.utils.utils import timeit
 
-class RNNCriticReplayPool(object):
+class ReplayPool(object):
 
     def __init__(self, env_spec, env_horizon, N, gamma, size, obs_history_len, sampling_method,
                  save_rollouts=False, save_rollouts_observations=True, save_env_infos=False, replay_pool_params={}):

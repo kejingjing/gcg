@@ -7,7 +7,7 @@ from rllab.misc.ext import set_seed
 import rllab.misc.logger as logger
 
 from sandbox.gkahn.gcg.policies.mac_policy import MACPolicy
-from sandbox.gkahn.gcg.sampler.sampler import RNNCriticSampler
+from sandbox.gkahn.gcg.sampler.sampler import Sampler
 
 from sandbox.gkahn.gcg.envs.env_utils import create_env
 
@@ -77,7 +77,7 @@ class EvalExp(object):
             else:
                 max_path_length = self.env.horizon
 
-            sampler = RNNCriticSampler(
+            sampler = Sampler(
                 policy=policy,
                 env=self.env,
                 n_envs=n_envs,

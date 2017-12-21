@@ -9,7 +9,7 @@ from rllab import config
 from sandbox.gkahn.gcg.envs.env_utils import create_env
 from sandbox.gkahn.gcg.policies.mac_policy import MACPolicy
 from sandbox.gkahn.gcg.policies.rccar_mac_policy import RCcarMACPolicy
-from sandbox.gkahn.gcg.sampler.sampler import RNNCriticSampler
+from sandbox.gkahn.gcg.sampler.sampler import Sampler
 from sandbox.gkahn.gcg.utils.utils import timeit
 from sandbox.gkahn.gcg.utils import logger
 

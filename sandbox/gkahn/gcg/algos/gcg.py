@@ -9,7 +9,7 @@ from rllab import config
 from sandbox.gkahn.gcg.envs.env_utils import create_env
 from sandbox.gkahn.gcg.policies.mac_policy import MACPolicy
 from sandbox.gkahn.gcg.policies.rccar_mac_policy import RCcarMACPolicy
-from sandbox.gkahn.gcg.sampler.sampler import RNNCriticSampler
+from sandbox.gkahn.gcg.sampler.sampler import Sampler
 from sandbox.gkahn.gcg.utils.utils import timeit
 from sandbox.gkahn.gcg.utils import logger
 from sandbox.gkahn.gcg.utils import mypickle
@@ -24,7 +24,7 @@ class GCG(RLAlgorithm):
         self._save_rollouts = kwargs['save_rollouts']
         self._save_rollouts_observations = kwargs['save_rollouts_observations']
 
-        self._sampler = RNNCriticSampler(
+        self._sampler = Sampler(
             policy=kwargs['policy'],
             env=kwargs['env'],
             n_envs=kwargs['n_envs'],
@@ -39,7 +39,7 @@ class GCG(RLAlgorithm):
         )
 
         if kwargs['env_eval'] is not None:
-            self._eval_sampler = RNNCriticSampler(
+            self._eval_sampler = Sampler(
                 policy=kwargs['policy'],
                 env=kwargs['env_eval'],
                 n_envs=1,
@@ -216,6 +216,10 @@ class GCG(RLAlgorithm):
 
         target_updated = False
         eval_rollouts = []
+
+        self._sampler.reset()
+        if self._eval_sampler is not None:
+            self._eval_sampler.reset()
 
         timeit.reset()
         timeit.start('total')
