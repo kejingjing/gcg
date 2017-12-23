@@ -263,14 +263,18 @@ class MACPolicy(Parameterized, Serializable):
         rnn_outputs = tf.reshape(rnn_outputs, (-1, rnn_output_dim))
 
         self._output_graph.update({'output_dim': 1})
-        tf_nstep_rewards, _ = networks.fcnn(rnn_outputs, self._output_graph, is_training=is_training, scope='fcnn_rewards',
+        # rewards
+        tf_yhats, _ = networks.fcnn(rnn_outputs, self._output_graph, is_training=is_training, scope='fcnn_yhats',
                                             T=H, global_step_tensor=self.global_step, num_dp=num_dp)
-        tf_nstep_values, _ = networks.fcnn(rnn_outputs, self._output_graph, is_training=is_training, scope='fcnn_values',
+        tf_yhats = tf.reshape(tf_yhats, (-1, H))
+        # values
+        tf_bhats, _ = networks.fcnn(rnn_outputs, self._output_graph, is_training=is_training, scope='fcnn_bhats',
                                            T=H, global_step_tensor=self.global_step, num_dp=num_dp)
-        tf_nstep_rewards = tf.unstack(tf.reshape(tf_nstep_rewards, (-1, H)), axis=1)
-        tf_nstep_values = tf.unstack(tf.reshape(tf_nstep_values, (-1, H)), axis=1)
+        tf_bhats = tf.reshape(tf_bhats, (-1, H))
 
-        tf_values_list = [self._graph_calculate_value(h, tf_nstep_rewards, tf_nstep_values) for h in range(H)]
+        tf_values_list = [self._graph_calculate_value(h,
+                                                      tf.unstack(tf_yhats, axis=1),
+                                                      tf.unstack(tf_bhats, axis=1)) for h in range(H)]
         tf_values_list += [tf_values_list[-1]] * (N - H)
         tf_values = tf.stack(tf_values_list, 1)
 
@@ -289,7 +293,7 @@ class MACPolicy(Parameterized, Serializable):
 
         assert(tf_values.get_shape()[1].value == N)
 
-        return tf_values, tf_values_softmax, tf_nstep_rewards, tf_nstep_values
+        return tf_values, tf_values_softmax, tf_yhats, tf_bhats
 
     def _graph_calculate_value(self, n, tf_nstep_rewards, tf_nstep_values):
         tf_returns = tf_nstep_rewards[:n] + [tf_nstep_values[n]]
@@ -364,11 +368,11 @@ class MACPolicy(Parameterized, Serializable):
         with tf.variable_scope(scope_select, reuse=reuse_select):
             tf_values_all_select, tf_values_softmax_all_select, _, _ = \
                 self._graph_inference(tf_obs_lowd_repeat_select, tf_actions, get_action_params['values_softmax'],
-                                      tf_preprocess_select, is_training=False, N=N)  # [num_obs*k, H]
+                                      tf_preprocess_select, is_training=False, N=N)  # [num_obs*K, H]
         with tf.variable_scope(scope_eval, reuse=reuse_eval):
-            tf_values_all_eval, tf_values_softmax_all_eval, _, _ = \
+            tf_values_all_eval, tf_values_softmax_all_eval, tf_yhats_all_eval, tf_bhats_all_eval = \
                 self._graph_inference(tf_obs_lowd_repeat_eval, tf_actions, get_action_params['values_softmax'],
-                                      tf_preprocess_eval, is_training=False, N=N)  # [num_obs*k, H]
+                                      tf_preprocess_eval, is_training=False, N=N)  # [num_obs*K, H]
         ### get_action based on select (policy)
         tf_values_select = tf.reduce_sum(tf_values_all_select * tf_values_softmax_all_select, reduction_indices=1)  # [num_obs*K]
         tf_values_select = tf.reshape(tf_values_select, (num_obs, K))  # [num_obs, K]
@@ -381,6 +385,14 @@ class MACPolicy(Parameterized, Serializable):
         tf_values_eval = tf.reduce_sum(tf_values_all_eval * tf_values_softmax_all_eval, reduction_indices=1)  # [num_obs*K]
         tf_values_eval = tf.reshape(tf_values_eval, (num_obs, K))  # [num_obs, K]
         tf_get_action_value = tf.reduce_sum(tf_values_argmax_select * tf_values_eval, reduction_indices=1)
+        tf_get_action_yhats = tf.reduce_sum(
+            tf.tile(tf.expand_dims(tf_values_argmax_select, 2), (1, 1, H)) * \
+            tf.reshape(tf_yhats_all_eval, (num_obs, K, H)),
+            1) # [num_obs, H]
+        tf_get_action_bhats = tf.reduce_sum(
+            tf.tile(tf.expand_dims(tf_values_argmax_select, 2), (1, 1, H)) * \
+            tf.reshape(tf_bhats_all_eval, (num_obs, K, H)),
+            1)  # [num_obs, H]
 
         ### check shapes
         tf.assert_equal(tf.shape(tf_get_action)[0], num_obs)
@@ -389,7 +401,7 @@ class MACPolicy(Parameterized, Serializable):
 
         tf_get_action_reset_ops = []
 
-        return tf_get_action, tf_get_action_value, tf_get_action_reset_ops
+        return tf_get_action, tf_get_action_value, tf_get_action_yhats, tf_get_action_bhats, tf_get_action_reset_ops
 
     def _graph_get_action_explore(self, tf_actions, tf_es_ph_dict):
         """
@@ -415,8 +427,9 @@ class MACPolicy(Parameterized, Serializable):
 
         return tf_actions_explore
 
-    def _graph_cost(self, tf_train_values, tf_train_values_softmax, tf_rewards_ph, tf_dones_ph,
-                    tf_target_get_action_values, N=None):
+    def _graph_cost(self, tf_train_values, tf_train_values_softmax, tf_train_yhats, tf_train_bhats,
+                    tf_rewards_ph, tf_dones_ph,
+                    tf_target_get_action_values, tf_target_get_action_yhats, tf_target_get_action_bhats, N=None):
         """
         :param tf_train_values: [None, self._N]
         :param tf_train_values_softmax: [None, self._N]
@@ -497,7 +510,7 @@ class MACPolicy(Parameterized, Serializable):
             ### process obs to lowd
             tf_obs_lowd = self._graph_obs_to_lowd(tf_obs_ph, tf_preprocess, is_training=True)
             ### create training policy
-            tf_train_values, tf_train_values_softmax, _, _ = \
+            tf_train_values, tf_train_values_softmax, tf_yhats, tf_bhats = \
                 self._graph_inference(tf_obs_lowd, tf_actions_ph[:, :self._H, :],
                                       self._values_softmax, tf_preprocess, is_training=True)
 
@@ -507,18 +520,18 @@ class MACPolicy(Parameterized, Serializable):
                                       self._values_softmax, tf_preprocess, is_training=False)
             tf_get_value = tf.reduce_sum(tf_train_values_softmax_test * tf_train_values_test, reduction_indices=1)
 
-        return tf_preprocess, tf_train_values, tf_train_values_softmax, tf_get_value
+        return tf_preprocess, tf_train_values, tf_train_values_softmax, tf_yhats, tf_bhats, tf_get_value
 
     def _graph_setup_action_selection(self, policy_scope, tf_obs_ph, tf_episode_timesteps_ph, tf_test_es_ph_dict):
         ### action selection
-        tf_get_action, tf_get_action_value, tf_get_action_reset_ops = \
+        tf_get_action, tf_get_action_value, tf_get_action_yhats, tf_get_action_bhats, tf_get_action_reset_ops = \
             self._graph_get_action(tf_obs_ph, self._get_action_test,
                                    policy_scope, True, policy_scope, True,
                                    tf_episode_timesteps_ph, for_target=False)
         ### exploration strategy and logprob
         tf_get_action_explore = self._graph_get_action_explore(tf_get_action, tf_test_es_ph_dict)
 
-        return tf_get_action, tf_get_action_value, tf_get_action_reset_ops, tf_get_action_explore
+        return tf_get_action, tf_get_action_value, tf_get_action_yhats, tf_get_action_bhats, tf_get_action_reset_ops, tf_get_action_explore
 
     def _graph_setup_target(self, policy_scope, tf_obs_target_ph, tf_train_values, tf_policy_vars):
         ### create target network
@@ -529,7 +542,7 @@ class MACPolicy(Parameterized, Serializable):
                                                         for h in range(self._obs_history_len,
                                                                        self._obs_history_len + self._N + 1)],
                                                        0)
-            tf_target_get_action, tf_target_get_action_values, _ = \
+            tf_target_get_action, tf_target_get_action_values, tf_target_get_action_yhats, tf_target_get_action_bhats, _ = \
                 self._graph_get_action(tf_obs_target_ph_packed,
                                        self._get_action_target,
                                        scope_select=policy_scope,
@@ -560,7 +573,7 @@ class MACPolicy(Parameterized, Serializable):
             tf_target_vars = None
             tf_update_target_fn = None
 
-        return tf_target_get_action_values, tf_target_vars, tf_update_target_fn
+        return tf_target_get_action_values, tf_target_get_action_yhats, tf_target_get_action_bhats, tf_target_vars, tf_update_target_fn
 
     def _graph_setup(self):
         ### create session and graph
@@ -580,7 +593,7 @@ class MACPolicy(Parameterized, Serializable):
 
             ### setup policy
             policy_scope = 'policy'
-            tf_preprocess, tf_train_values, tf_train_values_softmax, tf_get_value = \
+            tf_preprocess, tf_train_values, tf_train_values_softmax, tf_train_yhats, tf_train_bhats, tf_get_value = \
                 self._graph_setup_policy(policy_scope, tf_obs_ph, tf_actions_ph)
 
             ### get action
@@ -595,12 +608,13 @@ class MACPolicy(Parameterized, Serializable):
 
             if not self._inference_only:
                 ### setup target
-                tf_target_get_action_values, tf_target_vars, tf_update_target_fn = \
+                tf_target_get_action_values, tf_target_get_action_yhats, tf_target_get_action_bhats, tf_target_vars, tf_update_target_fn = \
                     self._graph_setup_target(policy_scope, tf_obs_target_ph, tf_train_values, tf_policy_vars)
 
                 ### optimization
-                tf_cost, tf_mse = self._graph_cost(tf_train_values, tf_train_values_softmax, tf_rewards_ph, tf_dones_ph,
-                                                   tf_target_get_action_values)
+                tf_cost, tf_mse = self._graph_cost(tf_train_values, tf_train_values_softmax, tf_train_yhats, tf_train_bhats,
+                                                   tf_rewards_ph, tf_dones_ph,
+                                                   tf_target_get_action_values, tf_target_get_action_yhats, tf_target_get_action_bhats)
                 tf_opt, tf_lr_ph = self._graph_optimize(tf_cost, tf_trainable_policy_vars)
             else:
                 tf_target_vars = tf_update_target_fn = tf_cost = tf_mse = tf_opt = tf_lr_ph = None

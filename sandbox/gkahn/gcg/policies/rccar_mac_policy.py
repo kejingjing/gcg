@@ -54,12 +54,28 @@ class RCcarMACPolicy(MACPolicy, Serializable):
         rnn_outputs = tf.reshape(rnn_outputs, (-1, rnn_output_dim))
 
         self._output_graph.update({'output_dim': 1})
-        tf_values, _ = networks.fcnn(rnn_outputs, self._output_graph, is_training=is_training, scope='fcnn_values',
-                                     T=H, global_step_tensor=self.global_step, num_dp=num_dp)
-        tf_values = tf.reshape(tf_values, (-1, H))
-
+        # individual probcolls
+        tf_yhats, _ = networks.fcnn(rnn_outputs, self._output_graph, is_training=is_training, scope='fcnn_yhats',
+                                    T=H, global_step_tensor=self.global_step, num_dp=num_dp)
+        tf_yhats = tf.reshape(tf_yhats, (-1, H))
         if self._probcoll_strictly_increasing:
-            tf_values = tf_utils.cumulative_increasing_sum(tf_values)
+            tf_yhats = tf_utils.cumulative_increasing_sum(tf_yhats)
+        tf_nstep_rewards = -tf.sigmoid(tf_yhats) if self._is_classification else -tf_yhats
+        # future probcolls
+        if self._use_target:
+            tf_bhats, _ = networks.fcnn(rnn_outputs, self._output_graph, is_training=is_training, scope='fcnn_bhats',
+                                        T=H, global_step_tensor=self.global_step, num_dp=num_dp)
+            tf_bhats = tf.reshape(tf_bhats, (-1, H))
+            tf_nstep_values = -tf.sigmoid(tf_bhats) if self._is_classification else -tf_bhats
+        else:
+            tf_bhats = None
+            tf_nstep_values = tf.zeros((-1, H))
+
+        tf_values_list = [(1. / float(h + 1)) * self._graph_calculate_value(h,
+                                                                            tf.unstack(tf_nstep_rewards, axis=1),
+                                                                            tf.unstack(tf_nstep_values, axis=1))
+                          for h in range(H)]
+        tf_values = tf.stack(tf_values_list, 1)
 
         if values_softmax['type'] == 'final':
             tf_values_softmax = tf.zeros([batch_size, N])
@@ -76,7 +92,7 @@ class RCcarMACPolicy(MACPolicy, Serializable):
 
         assert(tf_values.get_shape()[1].value == H)
 
-        return tf_values, tf_values_softmax, None, None
+        return tf_values, tf_values_softmax, tf_yhats, tf_bhats
 
     def _graph_get_action(self, tf_obs_ph, get_action_params, scope_select, reuse_select, scope_eval, reuse_eval,
                           tf_episode_timesteps_ph, for_target):
@@ -97,23 +113,18 @@ class RCcarMACPolicy(MACPolicy, Serializable):
 
         get_action_type = get_action_params['type']
         if get_action_type == 'random':
-            tf_get_action, tf_get_value, tf_get_action_reset_ops = self._graph_get_action_random(
-                tf_obs_lowd_select, tf_obs_lowd_eval,
-                tf_preprocess_select, tf_preprocess_eval,
-                get_action_params, get_action_type,
-                scope_select, reuse_select,
-                scope_eval, reuse_eval,
-                for_target)
-        elif get_action_type == 'cem':
-            tf_get_action, tf_get_value, tf_get_action_reset_ops = self._graph_get_action_cem(
-                tf_obs_lowd_select, tf_obs_lowd_eval,
-                tf_preprocess_select, tf_preprocess_eval,
-                get_action_params, get_action_type, scope_select, reuse_select, scope_eval, reuse_eval,
-                tf_episode_timesteps_ph, for_target)
+            tf_get_action, tf_get_value, tf_get_action_yhats, tf_get_action_bhats, tf_get_action_reset_ops = \
+                self._graph_get_action_random(
+                    tf_obs_lowd_select, tf_obs_lowd_eval,
+                    tf_preprocess_select, tf_preprocess_eval,
+                    get_action_params, get_action_type,
+                    scope_select, reuse_select,
+                    scope_eval, reuse_eval,
+                    for_target)
         else:
             raise NotImplementedError
 
-        return tf_get_action, tf_get_value, tf_get_action_reset_ops
+        return tf_get_action, tf_get_value, tf_get_action_yhats, tf_get_action_bhats, tf_get_action_reset_ops
 
     def _graph_get_action_random(self, tf_obs_lowd_select, tf_obs_lowd_eval, tf_preprocess_select, tf_preprocess_eval,
                                  get_action_params, get_action_type, scope_select, reuse_select, scope_eval, reuse_eval,
@@ -147,16 +158,9 @@ class RCcarMACPolicy(MACPolicy, Serializable):
                 self._graph_inference(tf_obs_lowd_repeat_select, tf_actions, get_action_params['values_softmax'],
                                       tf_preprocess_select, is_training=False, num_dp=K)  # [num_obs*k, H]
         with tf.variable_scope(scope_eval, reuse=reuse_eval):
-            tf_values_all_eval, tf_values_softmax_all_eval, _, _ = \
+            tf_values_all_eval, tf_values_softmax_all_eval, tf_yhats_all_eval, tf_bhats_all_eval = \
                 self._graph_inference(tf_obs_lowd_repeat_eval, tf_actions, get_action_params['values_softmax'],
                                       tf_preprocess_eval, is_training=False, num_dp=K)  # [num_obs*k, H]
-        if self._is_classification:
-            ### convert pre-activation to post-activation
-            tf_values_all_select = -tf.sigmoid(tf_values_all_select)
-            tf_values_all_eval = -tf.sigmoid(tf_values_all_eval)
-        else:
-            tf_values_all_select = -tf_values_all_select
-            tf_values_all_eval = -tf_values_all_eval
         ### get_action based on select (policy)
         tf_values_select = tf.reduce_sum(tf_values_all_select * tf_values_softmax_all_select, reduction_indices=1)  # [num_obs*K]
         if add_speed_cost:
@@ -175,133 +179,27 @@ class RCcarMACPolicy(MACPolicy, Serializable):
                                                                     reduction_indices=1)
         tf_values_eval = tf.reshape(tf_values_eval, (num_obs, K))  # [num_obs, K]
         tf_get_action_value = tf.reduce_sum(tf_values_argmax_select * tf_values_eval, reduction_indices=1)
-        tf_get_action_reset_ops = []
+        tf_get_action_yhats = tf.reduce_sum(
+            tf.tile(tf.expand_dims(tf_values_argmax_select, 2), (1, 1, H)) * \
+            tf.reshape(tf_yhats_all_eval, (num_obs, K, H)),
+            1)  # [num_obs, H]
+        tf_get_action_bhats = tf.reduce_sum(
+            tf.tile(tf.expand_dims(tf_values_argmax_select, 2), (1, 1, H)) * \
+            tf.reshape(tf_bhats_all_eval, (num_obs, K, H)),
+            1)  # [num_obs, H]
 
         ### check shapes
         tf.assert_equal(tf.shape(tf_get_action)[0], num_obs)
         tf.assert_equal(tf.shape(tf_get_action_value)[0], num_obs)
         assert(tf_get_action.get_shape()[1].value == action_dim)
 
-        return tf_get_action, tf_get_action_value, tf_get_action_reset_ops
+        tf_get_action_reset_ops = []
 
-    def _graph_get_action_cem(self, tf_obs_lowd_select, tf_obs_lowd_eval, tf_preprocess_select, tf_preprocess_eval,
-                              get_action_params, get_action_type, scope_select, reuse_select, scope_eval, reuse_eval,
-                              tf_episode_timesteps_ph, for_target):
-        H = get_action_params['H']
-        assert (H <= self._N)
-        add_speed_cost = not for_target
+        return tf_get_action, tf_get_action_value, tf_get_action_yhats, tf_get_action_bhats, tf_get_action_reset_ops
 
-        num_obs = tf.shape(tf_obs_lowd_select)[0]
-        dU = self._env_spec.action_space.flat_dim
-        eps = get_action_params['cem']['eps']
-
-        def run_cem(cem_params, distribution):
-            init_M = cem_params['init_M']
-            M = cem_params['M']
-            K = cem_params['K']
-            num_additional_iters = cem_params['num_additional_iters']
-            Ms = [init_M] + [M] * num_additional_iters
-            tf_obs_lowd_repeat_selects = [tf_utils.repeat_2d(tf_obs_lowd_select, init_M, 0)] + \
-                                         [tf_utils.repeat_2d(tf_obs_lowd_select, M, 0)] * num_additional_iters
-
-            for M, tf_obs_lowd_repeat_select in zip(Ms, tf_obs_lowd_repeat_selects):
-                ### sample from current distribution
-                tf_flat_actions_preclip = distribution.sample((M,))
-                tf_flat_actions = tf.clip_by_value(
-                    tf_flat_actions_preclip,
-                    np.array(list(self._env_spec.action_space.low) * H, dtype=np.float32),
-                    np.array(list(self._env_spec.action_space.high) * H, dtype=np.float32))
-                tf_actions = tf.reshape(tf_flat_actions, (M, H, dU))
-
-                ### eval current distribution costs
-                with tf.variable_scope(scope_select, reuse=reuse_select):
-                    tf_values_all_select, tf_values_softmax_all_select, _, _ = \
-                        self._graph_inference(tf_obs_lowd_repeat_select, tf_actions,
-                                              get_action_params['values_softmax'],
-                                              tf_preprocess_select, is_training=False, num_dp=M)  # [num_obs*k, H]
-
-                if self._is_classification:
-                    tf_values_all_select = -tf.sigmoid(tf_values_all_select) # convert pre-activation to post-activation
-                else:
-                    tf_values_all_select = -tf_values_all_select
-
-                tf_values_select = tf.reduce_sum(tf_values_all_select * tf_values_softmax_all_select,
-                                                 reduction_indices=1)  # [num_obs*K] # TODO: if variable speed, need to multiple by kinetic energy
-                if add_speed_cost:
-                    max_speed = self._env_spec.action_space.high[1]
-                    tf_values_select -= self._speed_weight * tf.reduce_mean(tf.square(tf_actions[:, :, 1] - max_speed),
-                                                                            reduction_indices=1)
-
-                ### get top k
-                _, top_indices = tf.nn.top_k(tf_values_select, k=K)
-                top_controls = tf.gather(tf_flat_actions, indices=top_indices)
-
-                ### set new distribution based on top k
-                mean = tf.reduce_mean(top_controls, axis=0)
-                covar = tf.matmul(tf.transpose(top_controls), top_controls) / float(K)
-                sigma = covar + eps * tf.eye(H * dU)
-
-                distribution = tf.contrib.distributions.MultivariateNormalFullCovariance(
-                    loc=mean,
-                    covariance_matrix=sigma
-                )
-
-            return tf_values_select, tf_actions
-
-        control_dependencies = []
-        control_dependencies += [tf.assert_equal(num_obs, 1)]
-        control_dependencies += [tf.assert_equal(tf.shape(tf_episode_timesteps_ph)[0], 1)]
-        with tf.control_dependencies(control_dependencies):
-            with tf.variable_scope('cem_warm_start', reuse=False):
-                mu = tf.get_variable('mu', [dU * H], trainable=False)
-            tf_get_action_reset_ops = [mu.initializer]
-
-            control_lower = np.array(self._env_spec.action_space.low.tolist() * H, dtype=np.float32)
-            control_upper = np.array(self._env_spec.action_space.high.tolist() * H, dtype=np.float32)
-            control_std = np.square(control_upper - control_lower) / 12.0
-            init_distribution = tf.contrib.distributions.Uniform(control_lower, control_upper)
-            gauss_distribution = tf.contrib.distributions.MultivariateNormalDiag(loc=mu, scale_diag=control_std)
-
-            tf_values_select, tf_actions = tf.cond(tf.greater(tf_episode_timesteps_ph[0], 0),
-                                   lambda: run_cem(get_action_params['cem']['warm_start'], gauss_distribution),
-                                   lambda: run_cem(get_action_params['cem'], init_distribution))
-
-            ### get action from best of last batch
-            tf_get_action_index = tf.cast(tf.argmax(tf_values_select, axis=0), tf.int32)
-            tf_get_action_seq = tf_actions[tf_get_action_index]
-
-            ### update mu for warm starting
-            tf_get_action_seq_flat_end = tf.reshape(tf_get_action_seq[1:], (dU * (H - 1), ))
-            next_mean = tf.concat([tf_get_action_seq_flat_end, tf_get_action_seq_flat_end[-dU:]], axis=0)
-            update_mean = tf.assign(mu, next_mean)
-            with tf.control_dependencies([update_mean]):
-                tf_get_action = tf_get_action_seq[0]
-
-            ### get_action_value based on eval (target)
-            with tf.variable_scope(scope_eval, reuse=reuse_eval):
-                tf_actions = tf.expand_dims(tf_get_action_seq, 0)
-                tf_values_all_eval, tf_values_softmax_all_eval, _, _ = \
-                    self._graph_inference(tf_obs_lowd_eval, tf_actions, get_action_params['values_softmax'],
-                                          tf_preprocess_eval, is_training=False)  # [num_obs*k, H]
-
-                if self._is_classification:
-                    tf_values_all_eval = -tf.sigmoid(tf_values_all_eval) # convert pre-activation to post-activation
-                else:
-                    tf_values_all_eval = -tf_values_all_eval
-
-                tf_values_eval = tf.reduce_sum(tf_values_all_eval * tf_values_softmax_all_eval,
-                                               reduction_indices=1)  # [num_obs*K] # TODO: if variable speed, need to multiple by kinetic energy
-                if add_speed_cost:
-                    max_speed = self._env_spec.action_space.high[1]
-                    tf_values_eval -= self._speed_weight * tf.reduce_mean(tf.square(tf_actions[:, :, 1] - max_speed),
-                                                                          reduction_indices=1)
-
-                tf_get_action_value = tf_values_eval
-
-            return tf_get_action, tf_get_action_value, tf_get_action_reset_ops
-
-    def _graph_cost(self, tf_train_values, tf_train_values_softmax, tf_rewards_ph, tf_dones_ph,
-                    tf_target_get_action_values):
+    def _graph_cost(self, tf_train_values, tf_train_values_softmax, tf_train_yhats, tf_train_bhats,
+                    tf_rewards_ph, tf_dones_ph,
+                    tf_target_get_action_values, tf_target_get_action_yhats, tf_target_get_action_bhats):
         tf_dones = tf.cast(tf_dones_ph, tf.int32)
         tf_labels = tf.cast(tf.cumsum(tf_rewards_ph, axis=1) < -0.5, tf.float32)
 
@@ -337,40 +235,38 @@ class RCcarMACPolicy(MACPolicy, Serializable):
                 tf_labels = tf.cast(tf_dones_ph, tf.float32) * tf_labels + \
                             (1 - tf.cast(tf_dones_ph, tf.float32)) * tf.maximum(tf_labels, target_labels)
 
+        if self._use_target:
+            tf_target_get_action_bhats = tf.stop_gradient(tf_target_get_action_bhats)
+
+            tf_target_labels = []
+            for h in range(self._H):
+                tf_target_labels_h = tf.maximum(tf.reduce_max(tf_labels[:, h:], 1),
+                                                tf.reduce_max(tf_target_get_action_bhats[:, h:], 1))
+                if self._is_classification:
+                    tf_target_labels_h = tf.sigmoid(tf_target_labels_h)
+                tf_target_labels.append(tf_target_labels_h)
+            tf_target_labels = tf.stack(tf_target_labels, axis=1)
+        else:
+            tf_target_labels = None
+
         ### cost
         control_dependencies = []
         control_dependencies += [tf.assert_greater_equal(tf_labels, 0., name='cost_assert_2')]
         control_dependencies += [tf.assert_less_equal(tf_labels, 1., name='cost_assert_3')]
         with tf.control_dependencies(control_dependencies):
             if self._is_classification:
-                cross_entropies = tf.nn.sigmoid_cross_entropy_with_logits(logits=tf_train_values, labels=tf_labels)
+                cross_entropies = tf.nn.sigmoid_cross_entropy_with_logits(logits=tf_train_yhats, labels=tf_labels)
+                if tf_target_labels is not None:
+                    cross_entropies += tf.nn.sigmoid_cross_entropy_with_logits(logits=tf_train_bhats, labels=tf_target_labels)
                 cost = tf.reduce_sum(mask * cross_entropies)
             else:
-                mses = tf.square(tf_train_values - tf_labels)
+                mses = tf.square(tf_train_yhats - tf_labels)
+                if tf_target_labels is not None:
+                    mses += tf.square(tf_train_bhats - tf_target_labels)
                 cost = tf.reduce_sum(mask * mses)
             weight_decay = self._weight_decay * tf.add_n(tf.get_collection(tf.GraphKeys.REGULARIZATION_LOSSES))
 
         return cost + weight_decay, cost
-
-    def _graph_setup_policy(self, policy_scope, tf_obs_ph, tf_actions_ph):
-        ### policy
-        with tf.variable_scope(policy_scope):
-            ### create preprocess placeholders
-            tf_preprocess = self._graph_preprocess_placeholders()
-            ### process obs to lowd
-            tf_obs_lowd = self._graph_obs_to_lowd(tf_obs_ph, tf_preprocess, is_training=True)
-            ### create training policy
-            tf_train_values, tf_train_values_softmax, _, _ = \
-                self._graph_inference(tf_obs_lowd, tf_actions_ph[:, :self._H, :],
-                                      self._values_softmax, tf_preprocess, is_training=True)
-
-        with tf.variable_scope(policy_scope, reuse=True):
-            tf_train_values_test, tf_train_values_softmax_test, _, _ = \
-                self._graph_inference(tf_obs_lowd, tf_actions_ph[:, :self._get_action_test['H'], :],
-                                      self._values_softmax, tf_preprocess, is_training=False)
-            tf_get_value = -tf.sigmoid(tf_train_values_test) if self._is_classification else -tf_train_values_test
-
-        return tf_preprocess, tf_train_values, tf_train_values_softmax, tf_get_value
 
     ################
     ### Training ###
