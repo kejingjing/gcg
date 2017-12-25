@@ -5,7 +5,8 @@ class VecEnvExecutor(object):
     def __init__(self, envs, max_path_length):
         self.envs = envs
         self._action_space = envs[0].action_space
-        self._observation_space = envs[0].observation_space
+        self._observation_im_space = envs[0].observation_im_space
+        self._observation_vec_space = envs[0].observation_vec_space
         self.ts = np.zeros(len(self.envs), dtype='int')
         self.max_path_length = max_path_length
 
@@ -37,8 +38,12 @@ class VecEnvExecutor(object):
         return self._action_space
 
     @property
-    def observation_space(self):
-        return self._observation_space
+    def observation_im_space(self):
+        return self._observation_im_space
+
+    @property
+    def observation_vec_space(self):
+        return self._observation_vec_space
 
     def terminate(self):
         pass

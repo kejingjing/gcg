@@ -2,7 +2,7 @@ import gym
 
 #from rllab.misc.ext import set_seed
 #from rllab.envs.gym_env import GymEnv
-from avillaflor.tf.envs.base import TfEnv
+#from avillaflor.tf.envs.base import TfEnv
 from avillaflor.gcg.envs.rccar.square_env import SquareEnv
 from avillaflor.gcg.envs.rccar.square_cluttered_env import SquareClutteredEnv
 from avillaflor.gcg.envs.rccar.cylinder_env import CylinderEnv

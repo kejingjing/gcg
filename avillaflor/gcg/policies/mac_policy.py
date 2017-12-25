@@ -73,7 +73,8 @@ class MACPolicy(Policy, Serializable):
         ### logging
         self._log_stats = defaultdict(list)
 
-        Parameterized.__init__(self, sess=self._tf_dict['sess'])
+        Policy.__init__(self, self._env_spec, sess=self._tf_dict['sess'])
+#        Parameterized.__init__(self, sess=self._tf_dict['sess'])
 
         assert((self._N == 1 and self._H == 1) or
                (self._N > 1 and self._H == 1) or

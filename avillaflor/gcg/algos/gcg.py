@@ -215,8 +215,8 @@ def run_gcg(params):
     env = create_env(env_str, seed=params['seed'])
 
     env_eval_str = params['alg'].pop('env_eval', env_str)
-    env_eval = create_env(env_eval_str, is_normalize=normalize_env, seed=params['seed'])
-
+#    env_eval = create_env(env_eval_str, is_normalize=normalize_env, seed=params['seed'])
+    env_eval = create_env(env_eval_str, seed=params['seed'])
     env.reset()
     env_eval.reset()
 

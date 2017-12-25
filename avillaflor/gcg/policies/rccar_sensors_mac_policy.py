@@ -171,7 +171,7 @@ class RCcarSensorsMACPolicy(MACPolicy, Serializable):
 
             ### obs --> lower dimensional space
             if self._image_graph is not None:
-                obs_shape = [self._obs_history_len] + list(self._env_spec.observation_space.shape)[:2]
+                obs_shape = [self._obs_history_len] + list(self._env_spec.observation_im_space.shape)[:2]
                 layer = tf.transpose(tf.reshape(tf_obs_im_whitened, [-1] + list(obs_shape)), perm=(0, 2, 3, 1))
                 layer, _ = networks.convnn(layer, self._image_graph, is_training=is_training, scope='obs_to_lowd_convnn', global_step_tensor=self.global_step)
                 layer = layers.flatten(layer)

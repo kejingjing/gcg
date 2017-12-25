@@ -2,6 +2,7 @@ import time
 import numpy as np
 import sys
 from math import pi
+import cv2
 
 from avillaflor.tf.spaces.box import Box
 from avillaflor.envs.env_spec import EnvSpec
@@ -218,7 +219,6 @@ class CarEnv(DirectObject):
         if self._use_depth:
             plt.imshow(image[:, :, 0], cmap='gray')
         else:
-            import cv2
             def rgb2gray(rgb):
                 return np.dot(rgb[..., :3], [0.299, 0.587, 0.114])
 
@@ -442,10 +442,10 @@ class CarEnv(DirectObject):
     def _get_observation(self):
         self._obs = self._camera_sensor.observe()
         observation = []
-        observation.append(self.process(self._obs[0]))
+        observation.append(self.process(self._obs[0], self._obs_shape))
         if self._use_back_cam:
             self._back_obs = self._back_camera_sensor.observe()
-            observation.append(self.process(self._back_obs[0]))
+            observation.append(self.process(self._back_obs[0], self._obs_shape))
         observation = np.concatenate(observation, axis=2)
         return observation
 
