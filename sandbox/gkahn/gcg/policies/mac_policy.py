@@ -531,7 +531,7 @@ class MACPolicy(Parameterized, Serializable):
         ### exploration strategy and logprob
         tf_get_action_explore = self._graph_get_action_explore(tf_get_action, tf_test_es_ph_dict)
 
-        return tf_get_action, tf_get_action_value, tf_get_action_yhats, tf_get_action_bhats, tf_get_action_reset_ops, tf_get_action_explore
+        return tf_get_action, tf_get_action_value, tf_get_action_reset_ops, tf_get_action_explore
 
     def _graph_setup_target(self, policy_scope, tf_obs_target_ph, tf_train_values, tf_policy_vars):
         ### create target network
@@ -552,10 +552,13 @@ class MACPolicy(Parameterized, Serializable):
                                        tf_episode_timesteps_ph=None, # TODO would need to fill in
                                        for_target=True)
 
-            tf_target_get_action_values = tf.transpose(tf.reshape(tf_target_get_action_values, (self._N + 1, -1)))[:,
-                                          1:]
+            tf_target_get_action_values = tf.transpose(tf.reshape(tf_target_get_action_values, (self._N + 1, -1)))[:,1:]
+            tf_target_get_action_yhats = tf.transpose(tf.reshape(tf_target_get_action_yhats, (self._N + 1, -1)))[:,1:]
+            tf_target_get_action_bhats = tf.transpose(tf.reshape(tf_target_get_action_bhats, (self._N + 1, -1)))[:, 1:]
         else:
             tf_target_get_action_values = tf.zeros([tf.shape(tf_train_values)[0], self._N])
+            tf_target_get_action_yhats = None
+            tf_target_get_action_bhats = None
 
         ### update target network
         if self._use_target and self._separate_target_params:
@@ -712,6 +715,14 @@ class MACPolicy(Parameterized, Serializable):
         }
         if self._use_target:
             feed_dict[self._tf_dict['obs_target_ph']] = observations
+
+
+
+        # keys = sorted(self._tf_debug.keys())
+        # values = self._tf_dict['sess'].run([self._tf_debug[k] for k in keys], feed_dict=feed_dict)
+        # d = dict([(k, v) for k, v in zip(keys, values)])
+        # import IPython; IPython.embed()
+
 
         cost, mse, _ = self._tf_dict['sess'].run([self._tf_dict['cost'],
                                                   self._tf_dict['mse'],

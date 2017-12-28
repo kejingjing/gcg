@@ -69,7 +69,7 @@ class RCcarMACPolicy(MACPolicy, Serializable):
             tf_nstep_values = -tf.sigmoid(tf_bhats) if self._is_classification else -tf_bhats
         else:
             tf_bhats = None
-            tf_nstep_values = tf.zeros((-1, H))
+            tf_nstep_values = tf.zeros((batch_size, H))
 
         tf_values_list = [(1. / float(h + 1)) * self._graph_calculate_value(h,
                                                                             tf.unstack(tf_nstep_rewards, axis=1),
@@ -179,14 +179,20 @@ class RCcarMACPolicy(MACPolicy, Serializable):
                                                                     reduction_indices=1)
         tf_values_eval = tf.reshape(tf_values_eval, (num_obs, K))  # [num_obs, K]
         tf_get_action_value = tf.reduce_sum(tf_values_argmax_select * tf_values_eval, reduction_indices=1)
-        tf_get_action_yhats = tf.reduce_sum(
-            tf.tile(tf.expand_dims(tf_values_argmax_select, 2), (1, 1, H)) * \
-            tf.reshape(tf_yhats_all_eval, (num_obs, K, H)),
-            1)  # [num_obs, H]
-        tf_get_action_bhats = tf.reduce_sum(
-            tf.tile(tf.expand_dims(tf_values_argmax_select, 2), (1, 1, H)) * \
-            tf.reshape(tf_bhats_all_eval, (num_obs, K, H)),
-            1)  # [num_obs, H]
+        if tf_yhats_all_eval is not None:
+            tf_get_action_yhats = tf.reduce_sum(
+                tf.tile(tf.expand_dims(tf_values_argmax_select, 2), (1, 1, H)) * \
+                tf.reshape(tf_yhats_all_eval, (num_obs, K, H)),
+                1)  # [num_obs, H]
+        else:
+            tf_get_action_yhats = None # np.nan * tf.ones((num_obs, H))
+        if tf_bhats_all_eval is not None:
+            tf_get_action_bhats = tf.reduce_sum(
+                tf.tile(tf.expand_dims(tf_values_argmax_select, 2), (1, 1, H)) * \
+                tf.reshape(tf_bhats_all_eval, (num_obs, K, H)),
+                1)  # [num_obs, H]
+        else:
+            tf_get_action_bhats = None # np.nan * tf.ones((num_obs, H))
 
         ### check shapes
         tf.assert_equal(tf.shape(tf_get_action)[0], num_obs)
@@ -225,25 +231,16 @@ class RCcarMACPolicy(MACPolicy, Serializable):
         mask /= tf.reduce_sum(mask)
 
         ### desired values
-        # assert(not self._use_target)
-        if self._use_target:
-            target_labels = tf.stop_gradient(-tf_target_get_action_values)
-            control_dependencies = []
-            control_dependencies += [tf.assert_greater_equal(target_labels, 0., name='cost_assert_0')]
-            control_dependencies += [tf.assert_less_equal(target_labels, 1., name='cost_assert_1')]
-            with tf.control_dependencies(control_dependencies):
-                tf_labels = tf.cast(tf_dones_ph, tf.float32) * tf_labels + \
-                            (1 - tf.cast(tf_dones_ph, tf.float32)) * tf.maximum(tf_labels, target_labels)
-
         if self._use_target:
             tf_target_get_action_bhats = tf.stop_gradient(tf_target_get_action_bhats)
+            if self._is_classification:
+                tf_target_get_action_bhats = tf.sigmoid(tf_target_get_action_bhats)
 
             tf_target_labels = []
             for h in range(self._H):
                 tf_target_labels_h = tf.maximum(tf.reduce_max(tf_labels[:, h:], 1),
-                                                tf.reduce_max(tf_target_get_action_bhats[:, h:], 1))
-                if self._is_classification:
-                    tf_target_labels_h = tf.sigmoid(tf_target_labels_h)
+                                                tf.reduce_max(tf.cast(1 - tf_dones[:, h:], tf.float32) *
+                                                              tf_target_get_action_bhats[:, h:], 1))
                 tf_target_labels.append(tf_target_labels_h)
             tf_target_labels = tf.stack(tf_target_labels, axis=1)
         else:
