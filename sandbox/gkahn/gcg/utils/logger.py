@@ -19,7 +19,7 @@ _color_formatter = ColoredFormatter(
 
 _normal_formatter = logging.Formatter(
     '%(asctime)s %(name)-10s %(levelname)-8s %(message)s',
-    datefmt='%m-%d %H:%M',
+    datefmt='%m-%d %H:%M:%S',
     style='%'
 )
 

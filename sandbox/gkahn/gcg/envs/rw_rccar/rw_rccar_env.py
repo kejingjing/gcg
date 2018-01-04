@@ -74,8 +74,8 @@ class RWrccarEnv:
         params.setdefault('steer_limits', [-1., 1.])
         params.setdefault('speed_limits', [0.2, 0.2])
         params.setdefault('collision_reward', 0.)
-        params.setdefault('backup_speed', -0.15)
-        params.setdefault('backup_duration', 2.5)
+        params.setdefault('backup_motor', -0.22)
+        params.setdefault('backup_duration', 1.6)
         params.setdefault('backup_steer_range', (-0.5, 0.5))
 
         self._dt = params['dt']
@@ -88,7 +88,7 @@ class RWrccarEnv:
         self._last_step_time = None
         self._is_collision = False
         self._collision_reward = params['collision_reward']
-        self._backup_speed = params['backup_speed']
+        self._backup_motor = params['backup_motor']
         self._backup_duration = params['backup_duration']
         self._backup_steer_range = params['backup_steer_range']
 
@@ -126,6 +126,9 @@ class RWrccarEnv:
             rospy.Subscriber(self._ros_namespace + topic, type, self._ros_callback, (topic,))
         self._ros_steer_pub = rospy.Publisher(self._ros_namespace + 'cmd/steer', std_msgs.msg.Float32, queue_size=10)
         self._ros_vel_pub = rospy.Publisher(self._ros_namespace + 'cmd/vel', std_msgs.msg.Float32, queue_size=10)
+        self._ros_motor_pub = rospy.Publisher(self._ros_namespace + 'cmd/motor', std_msgs.msg.Float32, queue_size=10)
+        self._ros_pid_enable_pub = rospy.Publisher(self._ros_namespace + 'pid/enable', std_msgs.msg.Empty, queue_size=10)
+        self._ros_pid_disable_pub = rospy.Publisher(self._ros_namespace + 'pid/disable', std_msgs.msg.Empty, queue_size=10)
 
         self._ros_rolloutbag = RolloutRosbag()
         self._ros_rolloutbag.open()
@@ -165,6 +168,13 @@ class RWrccarEnv:
             vel = 0.
         self._ros_vel_pub.publish(std_msgs.msg.Float32(vel))
 
+    def _set_motor(self, motor, duration):
+        self._ros_pid_disable_pub.publish(std_msgs.msg.Empty())
+        self._ros_motor_pub.publish(std_msgs.msg.Float32(motor))
+        rospy.sleep(duration)
+        self._ros_motor_pub.publish(std_msgs.msg.Float32(0.))
+        self._ros_pid_enable_pub.publish(std_msgs.msg.Empty())
+        
     def step(self, action):
         assert (self._ros_is_good)
 
@@ -190,6 +200,11 @@ class RWrccarEnv:
     def reset(self):
         assert (self._ros_is_good)
 
+        if self._is_collision:
+            logger.debug('Resetting (collision)')
+        else:
+            logger.debug('Resetting (no collision)')
+
         self._ros_rolloutbag.close()
 
         if self._ros_msgs['collision/flip'].data:
@@ -201,9 +216,7 @@ class RWrccarEnv:
 
         backup_steer = np.random.uniform(*self._backup_steer_range)
         self._set_steer(backup_steer)
-        self._set_vel(self._backup_speed)
-
-        rospy.sleep(self._backup_duration)
+        self._set_motor(self._backup_motor, self._backup_duration)
         self._set_steer(0.)
         self._set_vel(0.)
 
