@@ -72,11 +72,11 @@ class RWrccarEnv:
         params.setdefault('ros_namespace', '/rccar/')
         params.setdefault('obs_shape', (64, 36))
         params.setdefault('steer_limits', [-1., 1.])
-        params.setdefault('speed_limits', [0.3, 0.3])
+        params.setdefault('speed_limits', [0.2, 0.2])
         params.setdefault('collision_reward', 0.)
-        params.setdefault('backup_speed', -0.2)
-        params.setdefault('backup_duration', 1.)
-        params.setdefault('backup_steer_range', (-0.1, 0.1))
+        params.setdefault('backup_speed', -0.15)
+        params.setdefault('backup_duration', 2.5)
+        params.setdefault('backup_steer_range', (-0.5, 0.5))
 
         self._dt = params['dt']
         self.horizon = params['horizon']
@@ -115,6 +115,7 @@ class RWrccarEnv:
             ('collision/flip', std_msgs.msg.Int32),
             ('collision/jolt', std_msgs.msg.Int32),
             ('collision/stuck', std_msgs.msg.Int32),
+            ('collision/bumper', std_msgs.msg.Int32),
             ('cmd/steer', std_msgs.msg.Float32),
             ('cmd/motor', std_msgs.msg.Float32),
             ('cmd/vel', std_msgs.msg.Float32)
@@ -179,8 +180,6 @@ class RWrccarEnv:
         done = self._get_done()
         env_info = dict()
 
-        done = (np.random.random() < 0.1) # TODO
-
         self._ros_rolloutbag.write_all(self._ros_topics_and_types.keys(), self._ros_msgs, self._ros_msg_times)
 
         rospy.sleep(max(0., self._dt - (rospy.Time.now() - self._last_step_time).to_sec()))
@@ -208,6 +207,8 @@ class RWrccarEnv:
         self._set_steer(0.)
         self._set_vel(0.)
 
+        rospy.sleep(0.5)
+
         self._last_step_time = rospy.Time.now()
         self._is_collision = False
 
@@ -230,6 +231,9 @@ class RWrccarEnv:
             if msg.data == 1:
                 self._is_collision = True
 
+        #if 'collision' in topic and msg.data == 1 and 'all' not in topic:
+        #    logger.debug(topic)
+
     @property
     def _ros_is_good(self):
         # check that all not commands are coming in at a continuous rate
@@ -243,6 +247,11 @@ class RWrccarEnv:
         # check if in python mode
         if self._ros_msgs.get('mode') is None or self._ros_msgs['mode'].data != 2:
             logger.debug('In mode {0}'.format(self._ros_msgs.get('mode')))
+            return False
+
+        # check if battery is low
+        if self._ros_msgs.get('battery/low') is None or self._ros_msgs['battery/low'].data == 1:
+            logger.debug('Low battery!')
             return False
 
         return True

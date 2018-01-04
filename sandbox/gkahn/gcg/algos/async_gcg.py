@@ -178,10 +178,16 @@ class AsyncGCG(GCG):
 
         self._run_rsync()
 
-        self._sampler.reset()
-        if self._eval_sampler:
-            self._eval_sampler.reset()
-        eval_rollouts = []
+        while True:
+            try:
+                self._sampler.reset()
+                if self._eval_sampler:
+                    self._eval_sampler.reset()
+                eval_rollouts = []
+                break
+            except Exception as e:
+                logger.warn('Reset exception {0}'.format(str(e)))
+                input('Press enter to continue')
 
         timeit.reset()
         timeit.start('total')
