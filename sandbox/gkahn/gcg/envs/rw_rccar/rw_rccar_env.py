@@ -73,10 +73,12 @@ class RWrccarEnv:
         params.setdefault('obs_shape', (64, 36))
         params.setdefault('steer_limits', [-1., 1.])
         params.setdefault('speed_limits', [0.2, 0.2])
-        params.setdefault('collision_reward', 0.)
         params.setdefault('backup_motor', -0.22)
         params.setdefault('backup_duration', 1.6)
         params.setdefault('backup_steer_range', (-0.5, 0.5))
+
+        self._collision_reward = params['collision_reward']
+        self._collision_reward_only = params['collision_reward_only']
 
         self._dt = params['dt']
         self.horizon = params['horizon']
@@ -87,7 +89,6 @@ class RWrccarEnv:
 
         self._last_step_time = None
         self._is_collision = False
-        self._collision_reward = params['collision_reward']
         self._backup_motor = params['backup_motor']
         self._backup_duration = params['backup_duration']
         self._backup_steer_range = params['backup_steer_range']

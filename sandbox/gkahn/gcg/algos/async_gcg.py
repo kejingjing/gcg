@@ -12,6 +12,7 @@ from sandbox.gkahn.gcg.policies.rccar_mac_policy import RCcarMACPolicy
 from sandbox.gkahn.gcg.sampler.sampler import RNNCriticSampler
 from sandbox.gkahn.gcg.utils.utils import timeit
 from sandbox.gkahn.gcg.utils import logger
+from sandbox.gkahn.gcg.utils import mypickle
 
 from sandbox.gkahn.gcg.algos.gcg import GCG
 
@@ -77,7 +78,19 @@ class AsyncGCG(GCG):
 
     def _get_inference_step(self):
         """ Returns number of steps taken the environment """
-        return self._get_inference_itr() * self._save_every_n_steps
+        inference_itr = 0
+        inference_step = 0
+        while True:
+            fname = self._train_rollouts_file_name(inference_itr)
+            if not os.path.exists(fname):
+                break
+
+            rollouts = mypickle.load(fname)['rollouts']
+
+            inference_itr += 1
+            inference_step += sum([len(r['dones']) for r in rollouts])
+
+        return inference_step
 
     def _get_train_step(self):
         """ Returns number of training steps taken """
@@ -107,13 +120,13 @@ class AsyncGCG(GCG):
         timeit.reset()
         timeit.start('total')
         while True:
-            inference_step = self._get_inference_step()
+            inference_step = len(self._sampler)
             if inference_step > self._total_steps:
                 break
 
             if inference_step >= self._learn_after_n_steps:
                 ### update preprocess
-                if inference_step == self._learn_after_n_steps or inference_step % self._update_preprocess_every_n_steps == 0:
+                if train_step % self._update_preprocess_every_n_steps == 0:
                     self._policy.update_preprocess(self._sampler.statistics)
 
                 ### training step
