@@ -132,8 +132,7 @@ class GCG(RLAlgorithm):
     ### Restore ###
     ###############
 
-    def _add_offpolicy(self, folders_str, max_to_add):
-        folders = eval(folder_str)
+    def _add_offpolicy(self, folders, max_to_add):
         for folder in folders:
             assert (os.path.exists(folder))
             logger.info('Loading offpolicy data from {0}'.format(folder))

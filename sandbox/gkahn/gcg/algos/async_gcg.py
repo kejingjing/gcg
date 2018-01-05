@@ -114,13 +114,14 @@ class AsyncGCG(GCG):
         train_itr = self._get_train_itr()
         train_step = self._get_train_step()
         inference_itr = self._get_inference_itr()
+        init_inference_step = len(self._sampler)
 
         target_updated = False
 
         timeit.reset()
         timeit.start('total')
         while True:
-            inference_step = len(self._sampler)
+            inference_step = len(self._sampler) - init_inference_step
             if inference_step > self._total_steps:
                 break
 
