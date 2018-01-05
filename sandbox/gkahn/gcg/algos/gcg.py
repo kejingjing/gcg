@@ -13,11 +13,13 @@ from sandbox.gkahn.gcg.sampler.sampler import RNNCriticSampler
 from sandbox.gkahn.gcg.utils.utils import timeit
 from sandbox.gkahn.gcg.utils import logger
 from sandbox.gkahn.gcg.utils import mypickle
+from sandbox.gkahn.gcg.utils import utils
 
 class GCG(RLAlgorithm):
 
     def __init__(self, **kwargs):
 
+        self._env = utils.inner_env(kwargs['env'])
         self._policy = kwargs['policy']
 
         self._batch_size = kwargs['batch_size']
@@ -130,11 +132,13 @@ class GCG(RLAlgorithm):
     ### Restore ###
     ###############
 
-    def _add_offpolicy(self, folder, max_to_add):
-        assert (os.path.exists(folder))
-        logger.info('Loading offpolicy data from {0}'.format(folder))
-        rollout_filenames = [os.path.join(folder, fname) for fname in os.listdir(folder) if 'train_rollouts.pkl' in fname]
-        self._sampler.add_rollouts(rollout_filenames, max_to_add=max_to_add)
+    def _add_offpolicy(self, folders_str, max_to_add):
+        folders = eval(folder_str)
+        for folder in folders:
+            assert (os.path.exists(folder))
+            logger.info('Loading offpolicy data from {0}'.format(folder))
+            rollout_filenames = [os.path.join(folder, fname) for fname in os.listdir(folder) if 'train_rollouts.pkl' in fname]
+            self._sampler.add_rollouts(rollout_filenames, max_to_add=max_to_add)
         logger.info('Added {0} samples'.format(len(self._sampler)))
 
     def _get_train_itr(self):

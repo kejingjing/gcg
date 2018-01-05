@@ -4,7 +4,7 @@ from colorlog import ColoredFormatter
 
 _color_formatter = ColoredFormatter(
     "%(asctime)s %(log_color)s%(name)-10s %(levelname)-8s%(reset)s %(white)s%(message)s",
-    datefmt='%m-%d %H:%M',
+    datefmt='%m-%d %H:%M:%S',
     reset=True,
     log_colors={
         'DEBUG':    'cyan',

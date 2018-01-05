@@ -200,7 +200,9 @@ class AsyncGCG(GCG):
                 break
             except Exception as e:
                 logger.warn('Reset exception {0}'.format(str(e)))
-                input('Press enter to continue')
+                while not self._env.ros_is_good(print=False): # TODO hard coded
+                    time.sleep(0.25)
+                logger.warn('Continuing...')
 
         timeit.reset()
         timeit.start('total')
@@ -223,7 +225,9 @@ class AsyncGCG(GCG):
                     trashed_steps = self._sampler.trash_current_rollouts()
                     inference_step -= trashed_steps
                     logger.warn('Trashed {0} steps'.format(trashed_steps))
-                    input('Press enter to continue')
+                    while not self._env.ros_is_good(print=False): # TODO hard coded
+                        time.sleep(0.25)
+                    logger.warn('Continuing...')
                 timeit.stop('sample')
             else:
                 inference_step += self._sampler.n_envs
@@ -351,6 +355,7 @@ def run_async_gcg_inference(params):
 
     # should only save minimal amount of rollouts in the replay buffer
     params = copy.deepcopy(params)
+    params['alg']['offpolicy'] = None
     max_path_length = params['alg']['max_path_length']
     params['alg']['replay_pool_size'] = int(1.5 * max_path_length)
     params['policy']['inference_only'] = True

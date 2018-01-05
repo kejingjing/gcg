@@ -171,13 +171,14 @@ class RWrccarEnv:
 
     def _set_motor(self, motor, duration):
         self._ros_pid_disable_pub.publish(std_msgs.msg.Empty())
+        rospy.sleep(0.25)
         self._ros_motor_pub.publish(std_msgs.msg.Float32(motor))
         rospy.sleep(duration)
         self._ros_motor_pub.publish(std_msgs.msg.Float32(0.))
         self._ros_pid_enable_pub.publish(std_msgs.msg.Empty())
         
     def step(self, action):
-        assert (self._ros_is_good)
+        assert (self.ros_is_good())
 
         lb, ub = self.action_space.bounds
         action = np.clip(action, lb, ub)
@@ -199,7 +200,7 @@ class RWrccarEnv:
         return next_observation, reward, done, env_info
 
     def reset(self):
-        assert (self._ros_is_good)
+        assert (self.ros_is_good())
 
         if self._is_collision:
             logger.debug('Resetting (collision)')
@@ -228,7 +229,7 @@ class RWrccarEnv:
 
         self._ros_rolloutbag.open()
 
-        assert (self._ros_is_good)
+        assert (self.ros_is_good())
 
         return self._get_observation()
         
@@ -248,24 +249,26 @@ class RWrccarEnv:
         #if 'collision' in topic and msg.data == 1 and 'all' not in topic:
         #    logger.debug(topic)
 
-    @property
-    def _ros_is_good(self):
+    def ros_is_good(self, print=True):
         # check that all not commands are coming in at a continuous rate
         for topic in self._ros_topics_and_types.keys():
             if 'cmd' not in topic and 'collision' not in topic:
                 elapsed = (rospy.Time.now() - self._ros_msg_times[topic]).to_sec()
                 if elapsed > self._dt:
-                    logger.debug('Topic {0} was received {1} seconds ago (dt is {2})'.format(topic, elapsed, self._dt))
+                    if print:
+                        logger.debug('Topic {0} was received {1} seconds ago (dt is {2})'.format(topic, elapsed, self._dt))
                     return False
 
         # check if in python mode
         if self._ros_msgs.get('mode') is None or self._ros_msgs['mode'].data != 2:
-            logger.debug('In mode {0}'.format(self._ros_msgs.get('mode')))
+            if print:
+                logger.debug('In mode {0}'.format(self._ros_msgs.get('mode')))
             return False
 
         # check if battery is low
         if self._ros_msgs.get('battery/low') is None or self._ros_msgs['battery/low'].data == 1:
-            logger.debug('Low battery!')
+            if print:
+                logger.debug('Low battery!')
             return False
 
         return True
