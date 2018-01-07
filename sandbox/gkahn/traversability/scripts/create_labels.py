@@ -9,16 +9,19 @@ from PIL import Image
 parser = argparse.ArgumentParser()
 parser.add_argument('folder', type=str)
 parser.add_argument('-reshape', type=str, default='(36, 64)')
-parser.add_argument('-border', type=int, default=10)
+parser.add_argument('-resize', type=float, default=10.)
+parser.add_argument('-border', type=int, default=100)
 args = parser.parse_args()
 
 folder = args.folder
 reshape = eval(args.reshape)
+resize = args.resize
 border = args.border
 
 print('')
 print('folder: {0}'.format(folder))
 print('reshape: {0}'.format(reshape))
+print('resize: {0}'.format(resize))
 print('border: {0}'.format(border))
 print('')
 
@@ -28,8 +31,8 @@ assert(os.path.exists(csv_fname))
 csv = pandas.read_csv(csv_fname)
 
 ### image indices
-xdim = reshape[0] + 2*border
-ydim = reshape[1] + 2*border
+xdim = int(resize)*reshape[0] + 2*border
+ydim = int(resize)*reshape[1] + 2*border
 x, y = np.meshgrid(np.arange(xdim), np.arange(ydim))
 indices = np.vstack((y.flatten(), x.flatten())).T
 
@@ -54,10 +57,10 @@ for i in range(len(csv)):
 print('{0} were labelled'.format(num_labelled))
 print('')
 
-# import matplotlib.pyplot as plt
-# im = 255 * np.ones((xdim, ydim), np.uint8) * label
-# plt.imshow(im, cmap='Greys_r')
-# plt.show(block=False)
-# plt.pause(0.1)
+import matplotlib.pyplot as plt
+im = 255 * np.ones((xdim, ydim), np.uint8) * label
+plt.imshow(im, cmap='Greys_r')
+plt.show(block=False)
+plt.pause(0.1)
 
-# import IPython; IPython.embed()
+import IPython; IPython.embed()
