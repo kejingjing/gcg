@@ -109,9 +109,9 @@ class TraversabilityPolicy:
 
         ### get relevant outputs
         tf_scores = network.upscore32
-        tf_preds = network.pred_up
+        tf_probs = network.prob32
 
-        return tf_scores, tf_preds
+        return tf_scores, tf_probs
 
     def _graph_cost(self, tf_labels_ph, tf_scores):
         num_classes = self._num_classes
@@ -128,10 +128,9 @@ class TraversabilityPolicy:
                                            head), reduction_indices=[1])
         else:
             cross_entropy = -tf.reduce_sum(
-                labels * tf.log(softmax), reduction_indices=[1])
+                labels * tf.log(softmax), reduction_indices=[1]) # TODO: change to built in softmax with logits
 
-        tf_mse = tf.reduce_mean(cross_entropy,
-                                            name='xentropy_mean')
+        tf_mse = tf.reduce_mean(cross_entropy, name='xentropy_mean')
 
         if len(tf.get_collection(tf.GraphKeys.REGULARIZATION_LOSSES)) > 0:
             tf_weight_decay = self._weight_decay * tf.add_n(tf.get_collection(tf.GraphKeys.REGULARIZATION_LOSSES))
@@ -164,7 +163,7 @@ class TraversabilityPolicy:
             ### inference
             policy_scope = 'policy'
             with tf.variable_scope(policy_scope):
-                tf_scores, tf_preds = self._graph_inference(tf_obs_ph)
+                tf_scores, tf_probs = self._graph_inference(tf_obs_ph)
 
             ### get policy variables
             tf_policy_vars = sorted(tf.get_collection(tf.GraphKeys.GLOBAL_VARIABLES,
@@ -191,6 +190,8 @@ class TraversabilityPolicy:
             'graph': tf_graph,
             'obs_ph': tf_obs_ph,
             'labels_ph': tf_labels_ph,
+            'scores': tf_scores,
+            'probs': tf_probs,
             'cost': tf_cost,
             'mse': tf_mse,
             'opt': tf_opt,
@@ -245,7 +246,13 @@ class TraversabilityPolicy:
     #####################
 
     def get_model_outputs(self, observations, actions):
-        pass # TODO
+        feed_dict = {
+            self._tf_dict['obs_ph']: observations
+        }
+
+        probs,  = self._tf_dict['sess'].run([self._tf_dict['probs']], feed_dict=feed_dict)
+
+        return probs
 
     ######################
     ### Saving/loading ###

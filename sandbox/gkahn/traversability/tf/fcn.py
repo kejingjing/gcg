@@ -128,8 +128,15 @@ class FCN16VGG:
                                              num_classes=num_classes,
                                              debug=debug, name='upscore32',
                                              ksize=32, stride=16)
+        self.prob32 = self._softmax(self.upscore32, num_classes)
 
         self.pred_up = tf.argmax(self.upscore32, dimension=3)
+
+    def _softmax(self, logits, num_classes):
+        """ logits: [-1, xdim, ydim, num_classes] """
+        shape = tf.shape(logits)
+        probs = tf.reshape(tf.nn.softmax(tf.reshape(logits, (-1, num_classes))), shape)
+        return probs
 
     def _max_pool(self, bottom, name, debug):
         pool = tf.nn.max_pool(bottom, ksize=[1, 2, 2, 1], strides=[1, 2, 2, 1],
