@@ -1,3 +1,4 @@
+import os
 from collections import defaultdict
 
 import numpy as np
@@ -16,7 +17,9 @@ class TraversabilityPolicy:
         self._env_spec = kwargs['env_spec']
 
         ### training
+        self._num_classes = 2
         self._inference_only = kwargs.get('inference_only', False)
+        self._lr = kwargs['lr']
         self._weight_decay = kwargs['weight_decay']
         self._gpu_device = kwargs['gpu_device']
         self._gpu_frac = kwargs['gpu_frac']
@@ -89,14 +92,62 @@ class TraversabilityPolicy:
 
     def _graph_input_output_placeholders(self):
         assert(self._obs_is_im)
-        obs_shape = self._env_spec.observation_space.shape
+        obs_shape = list(self._env_spec.observation_space.shape)
         obs_dtype = tf.uint8
 
         with tf.variable_scope('input_output_placeholders'):
             tf_obs_ph = tf.placeholder(obs_dtype, [None] + obs_shape, name='tf_obs_ph')
-            tf_labels_ph = tf.placeholder(obs_dtype, [None] + obs_shape, name='tf_labels_ph')
+            tf_labels_ph = tf.placeholder(obs_dtype, [None] + obs_shape[:-1], name='tf_labels_ph')
 
         return tf_obs_ph, tf_labels_ph
+
+    def _graph_inference(self, tf_obs_ph):
+        ### create network
+        network = fcn.FCN16VGG()
+        rgb = tf.cast(tf.tile(tf_obs_ph, (1, 1, 1, 3)), tf.float32)
+        network.build(rgb, train=not self._inference_only, num_classes=self._num_classes)
+
+        ### get relevant outputs
+        tf_scores = network.upscore32
+        tf_preds = network.pred_up
+
+        return tf_scores, tf_preds
+
+    def _graph_cost(self, tf_labels_ph, tf_scores):
+        num_classes = self._num_classes
+        head = None
+
+        logits = tf.reshape(tf_scores, (-1, num_classes))
+        epsilon = tf.constant(value=1e-4)
+        labels = tf.to_float(tf.reshape(tf.one_hot(tf_labels_ph, num_classes, axis=3), (-1, num_classes)))
+
+        softmax = tf.nn.softmax(logits) + epsilon
+
+        if head is not None:
+            cross_entropy = -tf.reduce_sum(tf.multiply(labels * tf.log(softmax),
+                                           head), reduction_indices=[1])
+        else:
+            cross_entropy = -tf.reduce_sum(
+                labels * tf.log(softmax), reduction_indices=[1])
+
+        tf_mse = tf.reduce_mean(cross_entropy,
+                                            name='xentropy_mean')
+
+        if len(tf.get_collection(tf.GraphKeys.REGULARIZATION_LOSSES)) > 0:
+            tf_weight_decay = self._weight_decay * tf.add_n(tf.get_collection(tf.GraphKeys.REGULARIZATION_LOSSES))
+        else:
+            tf_weight_decay = 0
+        tf_cost = tf_mse + tf_weight_decay
+
+        return tf_cost, tf_mse
+
+    def _graph_optimize(self, tf_cost, tf_policy_vars):
+        update_ops = tf.get_collection(tf.GraphKeys.UPDATE_OPS)
+        with tf.control_dependencies(update_ops):
+            optimizer = tf.train.AdamOptimizer(learning_rate=self._lr, epsilon=1e-4)
+            gradients = optimizer.compute_gradients(tf_cost, var_list=tf_policy_vars)
+            tf_opt = optimizer.apply_gradients(gradients)
+        return tf_opt
 
     def _graph_setup(self):
         ### create session and graph
@@ -109,6 +160,44 @@ class TraversabilityPolicy:
         with tf_sess.as_default(), tf_graph.as_default():
             ### create input output placeholders
             tf_obs_ph, tf_labels_ph = self._graph_input_output_placeholders()
+
+            ### inference
+            policy_scope = 'policy'
+            with tf.variable_scope(policy_scope):
+                tf_scores, tf_preds = self._graph_inference(tf_obs_ph)
+
+            ### get policy variables
+            tf_policy_vars = sorted(tf.get_collection(tf.GraphKeys.GLOBAL_VARIABLES,
+                                                      scope=policy_scope), key=lambda v: v.name)
+            tf_trainable_policy_vars = sorted(tf.get_collection(tf.GraphKeys.GLOBAL_VARIABLES,
+                                                                scope=policy_scope), key=lambda v: v.name)
+
+            if not self._inference_only:
+                ### cost and optimize
+                tf_cost, tf_mse = self._graph_cost(tf_labels_ph, tf_scores)
+                tf_opt = self._graph_optimize(tf_cost, tf_trainable_policy_vars)
+            else:
+                tf_cost = tf_mse = tf_opt = None
+
+            ### savers
+            tf_saver_inference = tf.train.Saver(tf_policy_vars, max_to_keep=None)
+            tf_saver_train = tf.train.Saver(max_to_keep=None) if not self._inference_only else None
+
+            ### initialize
+            tf_sess.run([tf.global_variables_initializer()])
+
+        return {
+            'sess': tf_sess,
+            'graph': tf_graph,
+            'obs_ph': tf_obs_ph,
+            'labels_ph': tf_labels_ph,
+            'cost': tf_cost,
+            'mse': tf_mse,
+            'opt': tf_opt,
+            'saver_inference': tf_saver_inference,
+            'saver_train': tf_saver_train,
+            'policy_vars': tf_policy_vars
+        }
 
     ################
     ### Training ###
@@ -186,3 +275,22 @@ class TraversabilityPolicy:
             else:
                 rllab_logger.record_tabular(k, np.mean(self._log_stats[k]))
         self._log_stats.clear()
+
+    ########################
+    ### Offline training ###
+    ########################
+
+    def train_step_offline(self, images, labels):
+        feed_dict = {
+            self._tf_dict['obs_ph']: images,
+            self._tf_dict['labels_ph']: labels
+        }
+
+        cost, mse, _ = self._tf_dict['sess'].run([self._tf_dict['cost'],
+                                                  self._tf_dict['mse'],
+                                                  self._tf_dict['opt']],
+                                                 feed_dict=feed_dict)
+        assert(np.isfinite(cost))
+
+        self._log_stats['Cost'].append(cost)
+        self._log_stats['mse/cost'].append(mse / cost)
