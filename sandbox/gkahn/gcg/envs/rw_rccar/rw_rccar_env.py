@@ -172,10 +172,13 @@ class RWrccarEnv:
     def _set_motor(self, motor, duration):
         self._ros_pid_disable_pub.publish(std_msgs.msg.Empty())
         rospy.sleep(0.25)
-        self._ros_motor_pub.publish(std_msgs.msg.Float32(motor))
-        rospy.sleep(duration)
+        start_time = rospy.Time.now()
+        while not rospy.is_shutdown() and (rospy.Time.now() - start_time).to_sec() < duration:
+            self._ros_motor_pub.publish(std_msgs.msg.Float32(motor))
+            rospy.sleep(0.01)
         self._ros_motor_pub.publish(std_msgs.msg.Float32(0.))
         self._ros_pid_enable_pub.publish(std_msgs.msg.Empty())
+        rospy.sleep(0.25)
         
     def step(self, action):
         assert (self.ros_is_good())
