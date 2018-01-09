@@ -165,25 +165,25 @@ class EvalTraversabilityPolicy(object):
         ### plot evaluation
         logger.info('Plotting evaluation')
         for i, (image, label, prob) in enumerate(zip(images, labels, probs)):
-            label_coll = 1 - label
-            prob_coll = prob[:, :, 0]
-            pred_coll = prob.argmax(axis=2)
+            label_nocoll = 1 - label
+            prob_nocoll = prob[:, :, 0]
+            pred_nocoll = prob.argmax(axis=2)
 
             if i == 0:
                 # black is 0, white is 255
                 f, axes = plt.subplots(1, 4, figsize=(12, 3))
                 imshow0 = axes[0].imshow(image[:, :, 0], cmap='Greys_r', vmin=0, vmax=255)
-                imshow1 = axes[1].imshow(label_coll, cmap='Greys_r', vmin=0, vmax=1)
-                imshow2 = axes[2].imshow(prob_coll, cmap='Greys_r', vmin=0, vmax=1)
-                imshow3 = axes[3].imshow(label_coll == pred_coll, cmap='Greys_r', vmin=0, vmax=1)
+                imshow1 = axes[1].imshow(label_nocoll, cmap='Greys_r', vmin=0, vmax=1)
+                imshow2 = axes[2].imshow(prob_nocoll, cmap='Greys_r', vmin=0, vmax=1)
+                imshow3 = axes[3].imshow(label_nocoll == pred_nocoll, cmap='Greys_r', vmin=0, vmax=1)
                 for ax, title in zip(axes, ('image', 'label', 'model prob', 'error')):
                     ax.set_title(title)
                 plt.pause(0.01)
             else:
                 imshow0.set_data(image[:, :, 0])
-                imshow1.set_data(label_coll)
-                imshow2.set_data(prob_coll)
-                imshow3.set_data(label_coll == pred_coll)
+                imshow1.set_data(label_nocoll)
+                imshow2.set_data(prob_nocoll)
+                imshow3.set_data(label_nocoll == pred_nocoll)
                 f.canvas.draw()
                 plt.pause(0.01)
 
@@ -244,7 +244,7 @@ if __name__ == '__main__':
     parser.add_argument('method', type=str, choices=('offline', 'online'))
     parser.add_argument('--exps', nargs='+')
     parser.add_argument('-name', type=str, default='test') # online only
-    parser.add_argument('-numrollouts', type=int, default=10) # online only
+    parser.add_argument('-numrollouts', type=int, default=25) # online only
     args = parser.parse_args()
 
     for exp in args.exps:

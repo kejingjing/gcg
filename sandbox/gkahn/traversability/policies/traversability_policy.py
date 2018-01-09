@@ -229,8 +229,48 @@ class TraversabilityPolicy:
         return chosen_actions[0], chosen_values[0], action_info
 
     def get_actions(self, steps, current_episode_steps, observations, explore):
-        # TODO
-        actions = [self._env_spec.action_space.sample() for _ in steps]
+        obs_shape = list(self._env_spec.observation_space.shape)
+        observations = np.reshape(observations, [len(steps)] + obs_shape)
+
+        feed_dict = {
+            self._tf_dict['obs_ph']: observations
+        }
+
+        probs, = self._tf_dict['sess'].run([self._tf_dict['probs']], feed_dict=feed_dict)
+        probs_coll = probs[:, :, :, 1]
+
+        ### cost function
+        ind_horiz, ind_vert = np.meshgrid(np.arange(obs_shape[1]), np.arange(obs_shape[0]))
+
+        weights_vert = ind_vert/ ind_vert.sum(axis=0, keepdims=True)
+
+        weights_horiz = np.roll(ind_horiz, obs_shape[1] // 2, axis=1)
+        weights_horiz = abs(weights_horiz - weights_horiz.mean())
+        weights_horiz = weights_horiz / weights_horiz.sum(axis=1, keepdims=True)
+
+        weights = weights_vert + 0.5 * (obs_shape[0] / float(obs_shape[1])) * weights_horiz
+        weights /= weights.sum()
+        weights = np.tile(np.expand_dims(weights, 0), (len(steps), 1, 1))
+
+        cost_map = probs_coll * weights
+        kp = 0.15
+        steers = kp * (cost_map.sum(axis=1).argmin(axis=1) - obs_shape[1]//2) / float(obs_shape[1]//2)
+        speeds = np.ones(len(steps), dtype=float) * self._env_spec.action_space.high[1]
+        actions = np.vstack((steers, speeds)).T
+        actions = np.clip(actions, *self._env_spec.action_space.bounds)
+
+
+        # import matplotlib.pyplot as plt
+        # plt.figure()
+        # plt.imshow(weights, cmap='inferno')
+        #
+        # plt.figure()
+        # plt.imshow(1 - probs_coll[0], cmap='Greys_r', vmin=0, vmax=1)
+        # plt.show()
+        #
+        # import IPython; IPython.embed()
+
+        # actions = [self._env_spec.action_space.sample() for _ in steps]
         values = [np.nan] * len(steps)
         logprobs = [np.nan] * len(steps)
         d = {}
