@@ -32,8 +32,8 @@ def run(params):
 
     ### load data
     folder = policy_params['folder']
-    images = np.expand_dims(np.load(os.path.join(folder, 'data_images.npy')), 3)
-    labels = np.load(os.path.join(folder, 'data_labels.npy'))
+    images = np.expand_dims(np.load(os.path.join(folder, 'data_train_images.npy')), 3)
+    labels = np.load(os.path.join(folder, 'data_train_labels.npy'))
 
     save_dir = rllab_logger.get_snapshot_dir()
     def train_policy_file_name(itr):

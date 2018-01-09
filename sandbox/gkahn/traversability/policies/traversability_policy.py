@@ -229,7 +229,13 @@ class TraversabilityPolicy:
         return chosen_actions[0], chosen_values[0], action_info
 
     def get_actions(self, steps, current_episode_steps, observations, explore):
-        pass # TODO
+        # TODO
+        actions = [self._env_spec.action_space.sample() for _ in steps]
+        values = [np.nan] * len(steps)
+        logprobs = [np.nan] * len(steps)
+        d = {}
+
+        return actions, values, logprobs, d
 
     def reset_get_action(self):
         pass

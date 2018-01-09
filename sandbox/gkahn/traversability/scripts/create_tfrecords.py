@@ -1,4 +1,4 @@
-import argparse, os, glob
+import argparse, os, glob, random
 
 import numpy as np
 from PIL import Image
@@ -12,28 +12,33 @@ parser.add_argument('folder', type=str)
 parser.add_argument('-reshape', type=str, default='(36, 64)')
 parser.add_argument('-resize', type=float, default=10.)
 parser.add_argument('-border', type=int, default=100)
+parser.add_argument('-holdoutpct', type=float, default=0.2)
 args = parser.parse_args()
 
 folder = args.folder
 reshape = eval(args.reshape)
 resize = args.resize
 border = args.border
+holdoutpct = args.holdoutpct
 
 print('')
 print('folder: {0}'.format(folder))
 print('reshape: {0}'.format(reshape))
 print('resize: {0}'.format(resize))
 print('border: {0}'.format(border))
+print('holdoutpct: {0}'.format(holdoutpct))
 print('')
 
 ### setup tensorflow writing
-writer = tf.python_io.TFRecordWriter(os.path.join(folder, 'data.tfrecords'))
+writer_train = tf.python_io.TFRecordWriter(os.path.join(folder, 'data_train.tfrecords'))
+writer_holdout = tf.python_io.TFRecordWriter(os.path.join(folder, 'data_holdout.tfrecords'))
 
 ### read image, label pairs
 label_fnames = glob.glob(os.path.join(folder, 'label*'))
-images = []
-labels = []
-for label_fname in label_fnames:
+random.shuffle(label_fnames)
+images_train, labels_train = [], []
+images_holdout, labels_holdout = [], []
+for i, label_fname in enumerate(label_fnames):
     image_fname = label_fname.replace('label_', '')
 
     image = np.asarray(Image.open(image_fname))
@@ -68,14 +73,21 @@ for label_fname in label_fnames:
         'image_raw': _bytes_feature(image_raw),
         'label_raw': _bytes_feature(label_raw)
     }))
-    writer.write(example.SerializeToString())
 
-    images.append(image)
-    labels.append(label)
+    if i / float(len(label_fnames)) > holdoutpct:
+        writer_train.write(example.SerializeToString())
+        images_train.append(image)
+        labels_train.append(label)
+    else:
+        writer_holdout.write(example.SerializeToString())
+        images_holdout.append(image)
+        labels_holdout.append(label)
 
-np.save(os.path.join(folder, 'data_images.npy'), np.array(images))
-np.save(os.path.join(folder, 'data_labels.npy'), np.array(labels))
+np.save(os.path.join(folder, 'data_train_images.npy'), np.array(images_train))
+np.save(os.path.join(folder, 'data_train_labels.npy'), np.array(labels_train))
 
+np.save(os.path.join(folder, 'data_holdout_images.npy'), np.array(images_holdout))
+np.save(os.path.join(folder, 'data_holdout_labels.npy'), np.array(labels_holdout))
 
 # import matplotlib.pyplot as plt
 # im = 255 * np.ones(reshape, np.uint8) * label
