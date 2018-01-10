@@ -5,7 +5,6 @@ import numpy as np
 import matplotlib.pyplot as plt
 
 from rllab import config
-from rllab.misc.instrument import run_experiment_lite
 import rllab.misc.logger as rllab_logger
 
 from sandbox.gkahn.gcg.utils import logger
@@ -125,14 +124,13 @@ class EvalTraversabilityPolicy(object):
     def _offline_image_file_name(self, suffix, i):
         return os.path.join(self._offline_dir, '{0}_{1:03d}.png'.format(suffix, i))
 
-    @property
-    def _online_dir(self):
-        dir = os.path.join(self._save_dir, 'eval_online')
+    def _online_dir(self, name):
+        dir = os.path.join(self._save_dir, 'eval_online/{0}'.format(name))
         os.makedirs(dir, exist_ok=True)
         return dir
 
     def _online_rollouts_file_name(self, name):
-        return os.path.join(self._online_dir, '{0}.pkl'.format(name))
+        return os.path.join(self._online_dir(name), 'rollouts.pkl')
 
     def _save_online_rollouts(self, name, rollouts):
         fname = self._online_rollouts_file_name(name)
@@ -141,6 +139,9 @@ class EvalTraversabilityPolicy(object):
     def _load_online_rollouts(self, name):
         fname = self._online_rollouts_file_name(name)
         return mypickle.load(fname)['rollouts']
+
+    def _online_rollouts_images_file_name(self, name, rollout_num, timestep):
+        return os.path.join(self._online_dir(name), 'r{0:02d}_t{1:04}.png'.format(rollout_num, timestep))
 
     ##########################
     ### Offline evaluation ###
@@ -196,13 +197,17 @@ class EvalTraversabilityPolicy(object):
     ### Online evaluation ###
     #########################
 
-    def eval_online(self, name, num_rollouts):
+    def eval_online(self, name, num_rollouts, get_steer_func=None):
         if not os.path.exists(self._online_rollouts_file_name(name)):
-            self._generate_rollouts(name, num_rollouts)
+            self._generate_rollouts(name, num_rollouts, get_steer_func)
 
-        self._analyze_rollouts(self._load_online_rollouts(name))
+        logger.info(name)
+        self._analyze_rollouts(name)
+        logger.info('')
 
-    def _generate_rollouts(self, name, num_rollouts):
+    def _generate_rollouts(self, name, num_rollouts, get_steer_func):
+        self._policy.set_get_steer(get_steer_func)
+
         logger.info('Generating rollouts')
         sampler = Sampler(policy=self._policy,
                           env=self._env,
@@ -224,27 +229,113 @@ class EvalTraversabilityPolicy(object):
 
         self._save_online_rollouts(name, rollouts)
 
-    def _analyze_rollouts(self, rollouts):
-        logger.info('Analyzing rollouts')
-
+    def _analyze_rollouts(self, name):
+        rollouts = self._load_online_rollouts(name)
         durations = [len(r['dones']) for r in rollouts]
 
         logger.info('Duration: {0:.2f} +- {1:.1f}'.format(np.mean(durations), np.std(durations)))
+
+        create_images = not os.path.exists(self._online_rollouts_images_file_name(name, 0, 0))
+        if create_images:
+            for i, r in enumerate(rollouts):
+                for j, (obs, action, env_info) in enumerate(zip(r['observations'], r['actions'], r['env_infos'])):
+                    im = np.reshape(obs, (36, 64))
+                    probcoll = env_info['prob_coll']
+
+                    angle = -(np.pi / 2.) * action[0]
+                    xstart = 64 / 2.
+                    ystart = 34.
+                    dx = 10. * np.sin(angle)
+                    dy = -10. * np.cos(angle)
+
+                    if i == 0 and j == 0:
+                        f, axes = plt.subplots(1, 2, figsize=(12, 6))
+                        imshow = axes[0].imshow(im, cmap='Greys_r')
+                        collshow = axes[1].imshow(1 - probcoll, cmap='Greys_r', vmin=0, vmax=1)
+                        plt.tight_layout()
+                    else:
+                        imshow.set_data(im)
+                        collshow.set_data(1 - probcoll)
+                        arrow0.remove()
+                        arrow1.remove()
+
+                    arrow0 = axes[0].arrow(xstart, ystart, dx, dy, head_width=0.05, head_length=0.1, fc='r', ec='r')
+                    arrow1 = axes[1].arrow(xstart, ystart, dx, dy, head_width=0.05, head_length=0.1, fc='r', ec='r')
+                    for ax in axes:
+                        ax.set_title('{0:.2f}'.format(action[0]))
+
+                    f.savefig(self._online_rollouts_images_file_name(name, i, j), bbox_inches='tight', dpi=100)
+
+            plt.close(f)
 
 def run_offline(params):
     eval_trav = EvalTraversabilityPolicy(params)
     eval_trav.eval_offline()
 
-def run_online(params, name, num_rollouts):
+def run_online(params):
     eval_trav = EvalTraversabilityPolicy(params)
-    eval_trav.eval_online(name, num_rollouts)
+    num_rollouts = 4
+
+    dict_list = []
+
+    ### Find costs of left and right half of image and use e.g. ratio to calculate angle ###
+    def get_steer_func(kp):
+        def func(prob_coll):
+            obs_shape = list(prob_coll.shape)
+
+            weights = np.ones(obs_shape, dtype=np.float32)
+
+            cost_map = prob_coll * weights
+            cost_left = cost_map[:, :obs_shape[1]//2].sum()
+            cost_right = cost_map[:, obs_shape[1]//2:].sum()
+
+            steer = kp * 2. * (cost_right / (cost_left + cost_right) - 0.5)
+            return steer
+
+        return func
+
+    for kp in [5.0, 15.0]:
+        d = {
+            'name': 'halves_kp_{0:.2f}'.format(kp),
+            'get_steer_func': get_steer_func(kp)
+        }
+        dict_list.append(d)
+
+    ### Find highest point that is collision free and use as set point ###
+
+    def get_steer_func(coll_buffer, kp):
+        def func(prob_coll):
+            obs_shape = list(prob_coll.shape)
+
+            ### binarize
+            prob_coll = (prob_coll > 0.5).astype(np.float32)
+
+            ### apply buffer
+            import scipy.ndimage.filters
+            prob_coll_buffered = scipy.ndimage.filters.maximum_filter(prob_coll, coll_buffer + 1)
+
+            ### index of column with tallest continuous no collision
+            steer_index = (np.flipud(prob_coll_buffered).cumsum(axis=0) > 0).argmax(axis=0).argmax()
+
+            steer = -kp * (steer_index - (obs_shape[1]-1) / 2.) / float(obs_shape[1] / 2.)
+            return steer
+        return func
+
+    for coll_buffer in [2]: #range(0, 10, 2):
+        for kp in [1.]: #np.linspace(0.05, 1.0, 5):
+            d = {
+                'name': 'buffer_{0:d}_kp_{1:.2f}'.format(coll_buffer, kp),
+                'get_steer_func': get_steer_func(coll_buffer, kp)
+            }
+            dict_list.append(d)
+
+    for d in dict_list:
+        eval_trav.eval_online(d['name'], num_rollouts, d['get_steer_func'])
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('method', type=str, choices=('offline', 'online'))
     parser.add_argument('--exps', nargs='+')
-    parser.add_argument('-name', type=str, default='test') # online only
-    parser.add_argument('-numrollouts', type=int, default=25) # online only
     args = parser.parse_args()
 
     for exp in args.exps:
@@ -265,6 +356,6 @@ if __name__ == '__main__':
         if args.method == 'offline':
             run_offline(params)
         elif args.method == 'online':
-            run_online(params, args.name, args.numrollouts)
+            run_online(params)
         else:
             raise NotImplementedError

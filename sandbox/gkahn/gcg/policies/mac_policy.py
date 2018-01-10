@@ -744,12 +744,12 @@ class MACPolicy(Parameterized, Serializable):
     ######################
 
     def get_action(self, step, current_episode_step, observation, explore):
-        chosen_actions, chosen_values, action_info = self.get_actions([step], [current_episode_step] [observation],
+        chosen_actions, chosen_values, action_infos = self.get_actions([step], [current_episode_step] [observation],
                                                                       explore=explore)
-        return chosen_actions[0], chosen_values[0], action_info
+        return chosen_actions[0], chosen_values[0], action_infos[0]
 
     def get_actions(self, steps, current_episode_steps, observations, explore):
-        d = {}
+        ds = [{} for _ in steps]
         feed_dict = {
             self._tf_dict['obs_ph']: observations,
             self._tf_dict['episode_timesteps_ph']: current_episode_steps
@@ -774,7 +774,7 @@ class MACPolicy(Parameterized, Serializable):
         if isinstance(self._env_spec.action_space, Discrete):
             actions = [int(a.argmax()) for a in actions]
 
-        return actions, values, logprobs, d
+        return actions, values, logprobs, ds
 
     def reset_get_action(self):
         self._tf_dict['sess'].run(self._tf_dict['get_action_reset_ops'])

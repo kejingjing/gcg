@@ -95,7 +95,7 @@ class Sampler(object):
             else:
                 raise NotImplementedError
         else:
-            actions, est_values, logprobs, _ = self._policy.get_actions(
+            actions, est_values, logprobs, action_infos = self._policy.get_actions(
                 steps=list(range(step, step + self._n_envs)),
                 current_episode_steps=self._vec_env.current_episode_steps,
                 observations=encoded_observations,
@@ -103,6 +103,8 @@ class Sampler(object):
 
         ### take step
         next_observations, rewards, dones, env_infos = self._vec_env.step(actions)
+        for env_info, action_info in zip(env_infos, action_infos):
+            env_info.update(action_info)
 
         if np.any(dones):
             self._policy.reset_get_action()

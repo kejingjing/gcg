@@ -28,6 +28,9 @@ class TraversabilityPolicy:
         self._tf_debug = dict()
         self._tf_dict = self._graph_setup()
 
+        ### action selection
+        self._internal_get_steer = None
+
         ### logging
         self._log_stats = defaultdict(list)
 
@@ -228,6 +231,35 @@ class TraversabilityPolicy:
                                                                       explore=explore)
         return chosen_actions[0], chosen_values[0], action_info
 
+    def _default_get_steer(self, prob_coll):
+        obs_shape = list(self._env_spec.observation_space.shape)
+
+        ind_horiz, ind_vert = np.meshgrid(np.arange(obs_shape[1]), np.arange(obs_shape[0]))
+
+        weights_vert = ind_vert/ ind_vert.sum(axis=0, keepdims=True)
+
+        weights_horiz = np.roll(ind_horiz, obs_shape[1] // 2, axis=1)
+        weights_horiz = abs(weights_horiz - weights_horiz.mean())
+        weights_horiz = weights_horiz / weights_horiz.sum(axis=1, keepdims=True)
+
+        weights = weights_vert + 0.5 * (obs_shape[0] / float(obs_shape[1])) * weights_horiz
+        weights /= weights.sum()
+
+        cost_map = prob_coll * weights
+        kp = 0.15
+        steer = kp * (cost_map.sum(axis=0).argmin(axis=0) - obs_shape[1]//2) / float(obs_shape[1]//2)
+
+        return steer
+
+    def _get_steer(self, prob_coll):
+        if self._internal_get_steer is None:
+            return self._default_get_steer(prob_coll)
+        else:
+            return self._internal_get_steer(prob_coll)
+
+    def set_get_steer(self, get_steer_func):
+        self._internal_get_steer = get_steer_func
+
     def get_actions(self, steps, current_episode_steps, observations, explore):
         obs_shape = list(self._env_spec.observation_space.shape)
         observations = np.reshape(observations, [len(steps)] + obs_shape)
@@ -239,22 +271,7 @@ class TraversabilityPolicy:
         probs, = self._tf_dict['sess'].run([self._tf_dict['probs']], feed_dict=feed_dict)
         probs_coll = probs[:, :, :, 1]
 
-        ### cost function
-        ind_horiz, ind_vert = np.meshgrid(np.arange(obs_shape[1]), np.arange(obs_shape[0]))
-
-        weights_vert = ind_vert/ ind_vert.sum(axis=0, keepdims=True)
-
-        weights_horiz = np.roll(ind_horiz, obs_shape[1] // 2, axis=1)
-        weights_horiz = abs(weights_horiz - weights_horiz.mean())
-        weights_horiz = weights_horiz / weights_horiz.sum(axis=1, keepdims=True)
-
-        weights = weights_vert + 0.5 * (obs_shape[0] / float(obs_shape[1])) * weights_horiz
-        weights /= weights.sum()
-        weights = np.tile(np.expand_dims(weights, 0), (len(steps), 1, 1))
-
-        cost_map = probs_coll * weights
-        kp = 0.15
-        steers = kp * (cost_map.sum(axis=1).argmin(axis=1) - obs_shape[1]//2) / float(obs_shape[1]//2)
+        steers = [self._get_steer(prob_coll) for prob_coll in probs_coll]
         speeds = np.ones(len(steps), dtype=float) * self._env_spec.action_space.high[1]
         actions = np.vstack((steers, speeds)).T
         actions = np.clip(actions, *self._env_spec.action_space.bounds)
@@ -273,9 +290,9 @@ class TraversabilityPolicy:
         # actions = [self._env_spec.action_space.sample() for _ in steps]
         values = [np.nan] * len(steps)
         logprobs = [np.nan] * len(steps)
-        d = {}
+        action_infos = [{'prob_coll': prob_coll} for prob_coll in probs_coll]# [{}] * len(steps)
 
-        return actions, values, logprobs, d
+        return actions, values, logprobs, action_infos
 
     def reset_get_action(self):
         pass
