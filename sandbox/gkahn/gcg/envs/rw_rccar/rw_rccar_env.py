@@ -137,18 +137,17 @@ class RWrccarEnv:
             rospy.sleep(1)
 
     def _get_observation(self):
-        ### ROS --> np
         msg = self._ros_msgs['camera/image_raw/compressed']
+        return self.ros_img_msg_to_obs(msg)
 
-        # .03 seconds to do all below
-
+    def ros_img_msg_to_obs(self, msg):
         recon_pil_jpg = BytesIO(msg.data)
         recon_pil_arr = Image.open(recon_pil_jpg)
-        
+
         grayscale = recon_pil_arr.convert('L')
         grayscale_resized = grayscale.resize(self.observation_space.shape, Image.ANTIALIAS)
         im = np.array(grayscale_resized)
-        
+
         return im
 
     def _get_speed(self):
