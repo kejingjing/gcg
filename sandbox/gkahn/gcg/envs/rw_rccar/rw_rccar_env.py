@@ -75,12 +75,13 @@ class RWrccarEnv:
         params.setdefault('ros_namespace', '/rccar/')
         params.setdefault('obs_shape', (64, 36))
         params.setdefault('steer_limits', [-1., 1.])
-        params.setdefault('speed_limits', [0.3, 0.3])
-        params.setdefault('collision_reward', 0.)
-        params.setdefault('backup_speed', -0.2)
-        params.setdefault('backup_duration', 1.)
-        params.setdefault('backup_steer_range', (-0.1, 0.1))
-        params.setdefault('use_ros', True)
+        params.setdefault('speed_limits', [0.2, 0.2])
+        params.setdefault('backup_motor', -0.22)
+        params.setdefault('backup_duration', 1.6)
+        params.setdefault('backup_steer_range', (-0.5, 0.5))
+
+        self._collision_reward = params['collision_reward']
+        self._collision_reward_only = params['collision_reward_only']
 
         self._dt = params['dt']
         self.horizon = params['horizon']
@@ -91,56 +92,56 @@ class RWrccarEnv:
 
         self._last_step_time = None
         self._is_collision = False
-        self._collision_reward = params['collision_reward']
-        self._backup_speed = params['backup_speed']
+        self._backup_motor = params['backup_motor']
         self._backup_duration = params['backup_duration']
         self._backup_steer_range = params['backup_steer_range']
 
         ### ROS
-        if params['use_ros']:
-            rospy.init_node('RWrccarEnv', anonymous=True)
-            rospy.sleep(1)
+        rospy.init_node('RWrccarEnv', anonymous=True)
+        rospy.sleep(1)
 
-            self._ros_namespace = params['ros_namespace']
-            self._ros_topics_and_types = dict([
-                ('camera/image_raw/compressed', sensor_msgs.msg.CompressedImage),
-                ('mode', std_msgs.msg.Int32),
-                ('steer', std_msgs.msg.Float32),
-                ('motor', std_msgs.msg.Float32),
-                ('battery/a', std_msgs.msg.Float32),
-                ('battery/b', std_msgs.msg.Float32),
-                ('battery/low', std_msgs.msg.Int32),
-                ('encoder/left', std_msgs.msg.Float32),
-                ('encoder/right', std_msgs.msg.Float32),
-                ('encoder/both', std_msgs.msg.Float32),
-                ('orientation/quat', geometry_msgs.msg.Quaternion),
-                ('orientation/rpy', geometry_msgs.msg.Vector3),
-                ('imu', geometry_msgs.msg.Accel),
-                ('collision/all', std_msgs.msg.Int32),
-                ('collision/flip', std_msgs.msg.Int32),
-                ('collision/jolt', std_msgs.msg.Int32),
-                ('collision/stuck', std_msgs.msg.Int32),
-                ('cmd/steer', std_msgs.msg.Float32),
-                ('cmd/motor', std_msgs.msg.Float32),
-                ('cmd/vel', std_msgs.msg.Float32)
-            ])
-            self._ros_msgs = dict()
-            self._ros_msg_times = dict()
-            for topic, type in self._ros_topics_and_types.items():
-                rospy.Subscriber(self._ros_namespace + topic, type, self._ros_callback, (topic,))
-            self._ros_steer_pub = rospy.Publisher(self._ros_namespace + 'cmd/steer', std_msgs.msg.Float32, queue_size=10)
-            self._ros_vel_pub = rospy.Publisher(self._ros_namespace + 'cmd/vel', std_msgs.msg.Float32, queue_size=10)
+        self._ros_namespace = params['ros_namespace']
+        self._ros_topics_and_types = dict([
+            ('camera/image_raw/compressed', sensor_msgs.msg.CompressedImage),
+            ('mode', std_msgs.msg.Int32),
+            ('steer', std_msgs.msg.Float32),
+            ('motor', std_msgs.msg.Float32),
+            ('battery/a', std_msgs.msg.Float32),
+            ('battery/b', std_msgs.msg.Float32),
+            ('battery/low', std_msgs.msg.Int32),
+            ('encoder/left', std_msgs.msg.Float32),
+            ('encoder/right', std_msgs.msg.Float32),
+            ('encoder/both', std_msgs.msg.Float32),
+            ('orientation/quat', geometry_msgs.msg.Quaternion),
+            ('orientation/rpy', geometry_msgs.msg.Vector3),
+            ('imu', geometry_msgs.msg.Accel),
+            ('collision/all', std_msgs.msg.Int32),
+            ('collision/flip', std_msgs.msg.Int32),
+            ('collision/jolt', std_msgs.msg.Int32),
+            ('collision/stuck', std_msgs.msg.Int32),
+            ('collision/bumper', std_msgs.msg.Int32),
+            ('cmd/steer', std_msgs.msg.Float32),
+            ('cmd/motor', std_msgs.msg.Float32),
+            ('cmd/vel', std_msgs.msg.Float32)
+        ])
+        self._ros_msgs = dict()
+        self._ros_msg_times = dict()
+        for topic, type in self._ros_topics_and_types.items():
+            rospy.Subscriber(self._ros_namespace + topic, type, self.ros_msg_update, (topic,))
+        self._ros_steer_pub = rospy.Publisher(self._ros_namespace + 'cmd/steer', std_msgs.msg.Float32, queue_size=10)
+        self._ros_vel_pub = rospy.Publisher(self._ros_namespace + 'cmd/vel', std_msgs.msg.Float32, queue_size=10)
+        self._ros_motor_pub = rospy.Publisher(self._ros_namespace + 'cmd/motor', std_msgs.msg.Float32, queue_size=10)
+        self._ros_pid_enable_pub = rospy.Publisher(self._ros_namespace + 'pid/enable', std_msgs.msg.Empty, queue_size=10)
+        self._ros_pid_disable_pub = rospy.Publisher(self._ros_namespace + 'pid/disable', std_msgs.msg.Empty, queue_size=10)
 
-            self._ros_rolloutbag = RolloutRosbag()
-            self._ros_rolloutbag.open()
+        self._ros_rolloutbag = RolloutRosbag()
+        self._ros_rolloutbag.open()
 
-            rospy.sleep(1)
+        rospy.sleep(1)
 
     def _get_observation(self):
         msg = self._ros_msgs['camera/image_raw/compressed']
-        return self.ros_img_msg_to_obs(msg)
 
-    def ros_img_msg_to_obs(self, msg):
         recon_pil_jpg = BytesIO(msg.data)
         recon_pil_arr = Image.open(recon_pil_jpg)
 
@@ -168,8 +169,20 @@ class RWrccarEnv:
             vel = 0.
         self._ros_vel_pub.publish(std_msgs.msg.Float32(vel))
 
-    def step(self, action):
-        assert (self._ros_is_good)
+    def _set_motor(self, motor, duration):
+        self._ros_pid_disable_pub.publish(std_msgs.msg.Empty())
+        rospy.sleep(0.25)
+        start_time = rospy.Time.now()
+        while not rospy.is_shutdown() and (rospy.Time.now() - start_time).to_sec() < duration:
+            self._ros_motor_pub.publish(std_msgs.msg.Float32(motor))
+            rospy.sleep(0.01)
+        self._ros_motor_pub.publish(std_msgs.msg.Float32(0.))
+        self._ros_pid_enable_pub.publish(std_msgs.msg.Empty())
+        rospy.sleep(0.25)
+        
+    def step(self, action, offline=False):
+        if not offline:
+            assert (self.ros_is_good())
 
         lb, ub = self.action_space.bounds
         action = np.clip(action, lb, ub)
@@ -183,17 +196,25 @@ class RWrccarEnv:
         done = self._get_done()
         env_info = dict()
 
-        done = (np.random.random() < 0.1) # TODO
+        if not offline:
+            self._ros_rolloutbag.write_all(self._ros_topics_and_types.keys(), self._ros_msgs, self._ros_msg_times)
 
-        self._ros_rolloutbag.write_all(self._ros_topics_and_types.keys(), self._ros_msgs, self._ros_msg_times)
-
-        rospy.sleep(max(0., self._dt - (rospy.Time.now() - self._last_step_time).to_sec()))
-        self._last_step_time = rospy.Time.now()
+            rospy.sleep(max(0., self._dt - (rospy.Time.now() - self._last_step_time).to_sec())) # TODO: wrong place
+            self._last_step_time = rospy.Time.now()
 
         return next_observation, reward, done, env_info
 
-    def reset(self):
-        assert (self._ros_is_good)
+    def reset(self, offline=False):
+        if offline:
+            self._is_collision = False
+            return self._get_observation()
+
+        assert (self.ros_is_good())
+
+        if self._is_collision:
+            logger.debug('Resetting (collision)')
+        else:
+            logger.debug('Resetting (no collision)')
 
         self._ros_rolloutbag.close()
 
@@ -206,18 +227,18 @@ class RWrccarEnv:
 
         backup_steer = np.random.uniform(*self._backup_steer_range)
         self._set_steer(backup_steer)
-        self._set_vel(self._backup_speed)
-
-        rospy.sleep(self._backup_duration)
+        self._set_motor(self._backup_motor, self._backup_duration)
         self._set_steer(0.)
         self._set_vel(0.)
+
+        rospy.sleep(0.5)
 
         self._last_step_time = rospy.Time.now()
         self._is_collision = False
 
         self._ros_rolloutbag.open()
 
-        assert (self._ros_is_good)
+        assert (self.ros_is_good())
 
         return self._get_observation()
         
@@ -225,7 +246,7 @@ class RWrccarEnv:
     ### ROS ###
     ###########
 
-    def _ros_callback(self, msg, args):
+    def ros_msg_update(self, msg, args):
         topic = args[0]
         self._ros_msgs[topic] = msg
         self._ros_msg_times[topic] = rospy.Time.now()
@@ -234,19 +255,29 @@ class RWrccarEnv:
             if msg.data == 1:
                 self._is_collision = True
 
-    @property
-    def _ros_is_good(self):
+        #if 'collision' in topic and msg.data == 1 and 'all' not in topic:
+        #    logger.debug(topic)
+
+    def ros_is_good(self, print=True):
         # check that all not commands are coming in at a continuous rate
         for topic in self._ros_topics_and_types.keys():
             if 'cmd' not in topic and 'collision' not in topic:
                 elapsed = (rospy.Time.now() - self._ros_msg_times[topic]).to_sec()
                 if elapsed > self._dt:
-                    logger.debug('Topic {0} was received {1} seconds ago (dt is {2})'.format(topic, elapsed, self._dt))
+                    if print:
+                        logger.debug('Topic {0} was received {1} seconds ago (dt is {2})'.format(topic, elapsed, self._dt))
                     return False
 
         # check if in python mode
         if self._ros_msgs.get('mode') is None or self._ros_msgs['mode'].data != 2:
-            logger.debug('In mode {0}'.format(self._ros_msgs.get('mode')))
+            if print:
+                logger.debug('In mode {0}'.format(self._ros_msgs.get('mode')))
+            return False
+
+        # check if battery is low
+        if self._ros_msgs.get('battery/low') is None or self._ros_msgs['battery/low'].data == 1:
+            if print:
+                logger.debug('Low battery!')
             return False
 
         return True
