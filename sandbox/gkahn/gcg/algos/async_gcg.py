@@ -183,6 +183,17 @@ class AsyncGCG(GCG):
                     except:
                         logger.debug('Failed to load files for itr {0}'.format(i))
 
+    def _reset_sampler(self):
+        while True:
+            try:
+                self._sampler.reset()
+                break
+            except Exception as e:
+                logger.warn('Reset exception {0}'.format(str(e)))
+                while not self._env.ros_is_good(print=False): # TODO hard coded
+                    time.sleep(0.25)
+                logger.warn('Continuing...')
+
     def inference(self):
         ### restore where we left off
         self._restore_inference()
@@ -192,18 +203,10 @@ class AsyncGCG(GCG):
 
         self._run_rsync()
 
-        while True:
-            try:
-                self._sampler.reset()
-                if self._eval_sampler:
-                    self._eval_sampler.reset()
-                eval_rollouts = []
-                break
-            except Exception as e:
-                logger.warn('Reset exception {0}'.format(str(e)))
-                while not self._env.ros_is_good(print=False): # TODO hard coded
-                    time.sleep(0.25)
-                logger.warn('Continuing...')
+        assert (self._eval_sampler is None) # TODO: temporary
+        eval_rollouts = []
+
+        self._reset_sampler()
 
         timeit.reset()
         timeit.start('total')
@@ -228,6 +231,7 @@ class AsyncGCG(GCG):
                     logger.warn('Trashed {0} steps'.format(trashed_steps))
                     while not self._env.ros_is_good(print=False): # TODO hard coded
                         time.sleep(0.25)
+                    self._reset_sampler()
                     logger.warn('Continuing...')
                 timeit.stop('sample')
             else:

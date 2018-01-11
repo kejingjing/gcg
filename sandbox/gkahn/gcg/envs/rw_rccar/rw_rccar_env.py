@@ -36,8 +36,12 @@ class RolloutRosbag:
     def _rosbag_name(self, num):
         return os.path.join(self._rosbag_dir, 'rosbag{0:04d}.bag'.format(num))
 
+    @property
+    def is_open(self):
+        return (self._rosbag is not None)
+
     def open(self):
-        assert (self._rosbag is None)
+        assert (not self.is_open)
 
         bag_num = 0
         while os.path.exists(self._rosbag_name(bag_num)):
@@ -60,12 +64,23 @@ class RolloutRosbag:
             self.write(topic, msg_dict.get(topic), stamp_dict.get(topic))
 
     def close(self):
-        assert (self._rosbag is not None)
+        assert (self.is_open)
 
         self._rosbag.close()
         self._rosbag = None
         self._last_write = None
 
+    def trash(self):
+        assert (self.is_open)
+
+        bag_fname = self._rosbag.filename
+
+        try:
+            self.close()
+        except:
+            pass
+
+        os.remove(os.path.join(self._rosbag_dir, bag_fname))
 
 class RWrccarEnv:
 
@@ -136,7 +151,6 @@ class RWrccarEnv:
         self._ros_pid_disable_pub = rospy.Publisher(self._ros_namespace + 'pid/disable', std_msgs.msg.Empty, queue_size=10)
 
         self._ros_rolloutbag = RolloutRosbag()
-        self._ros_rolloutbag.open()
 
         rospy.sleep(1)
 
@@ -198,6 +212,10 @@ class RWrccarEnv:
         self._set_steer(cmd_steer)
         self._set_vel(cmd_vel)
 
+        if not offline:
+            rospy.sleep(max(0., self._dt - (rospy.Time.now() - self._last_step_time).to_sec()))
+            self._last_step_time = rospy.Time.now()
+
         next_observation = self._get_observation()
         reward = self._get_reward()
         done = self._get_done()
@@ -205,9 +223,8 @@ class RWrccarEnv:
 
         if not offline:
             self._ros_rolloutbag.write_all(self._ros_topics_and_types.keys(), self._ros_msgs, self._ros_msg_times)
-
-            rospy.sleep(max(0., self._dt - (rospy.Time.now() - self._last_step_time).to_sec())) # TODO: wrong place
-            self._last_step_time = rospy.Time.now()
+            if done:
+                self._ros_rolloutbag.close()
 
         return next_observation, reward, done, env_info
 
@@ -218,12 +235,15 @@ class RWrccarEnv:
 
         assert (self.ros_is_good())
 
+        if self._ros_rolloutbag.is_open:
+            # should've been closed in step when done
+            logger.debug('Trashing bag')
+            self._ros_rolloutbag.trash()
+
         if self._is_collision:
             logger.debug('Resetting (collision)')
         else:
             logger.debug('Resetting (no collision)')
-
-        self._ros_rolloutbag.close()
 
         if self._ros_msgs['collision/flip'].data:
             logger.warn('Car has flipped, please unflip it to continue')
