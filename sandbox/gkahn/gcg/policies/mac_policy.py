@@ -222,8 +222,6 @@ class MACPolicy(object):
                 layer = tf.reshape(layer, [-1] + list(obs_shape))
                 # [batch_size * hist_len, height, width, channels]
 
-                self._tf_debug['images'] = layer
-
                 layer, _ = networks.convnn(layer, self._image_graph, is_training=is_training,
                                            scope='obs_to_lowd_convnn', global_step_tensor=self.global_step)
                 layer = layers.flatten(layer)
@@ -720,28 +718,6 @@ class MACPolicy(object):
         }
         if self._use_target:
             feed_dict[self._tf_dict['obs_target_ph']] = observations
-
-        # keys = sorted(self._tf_debug.keys())
-        # values = self._tf_dict['sess'].run([self._tf_debug[k] for k in keys], feed_dict=feed_dict)
-        # d = dict([(k, v) for k, v in zip(keys, values)])
-        #
-        # import IPython; IPython.embed()
-        #
-        # import matplotlib.pyplot as plt
-        # f, axes = plt.subplots(1, self._obs_history_len, figsize=(12,3))
-        # for i in range(self._obs_history_len):
-        #     im = d['images'][4*3+i]
-        #     if self._env_spec.observation_space.shape[-1] == 1:
-        #         cmap = 'Greys_r'
-        #         im = im[:,:,0]
-        #     else:
-        #         cmap = None
-        #
-        #     im = np.clip((128 *im) + 128, 0, 255).astype(np.uint8)
-        #
-        #     axes[i].imshow(im, cmap=cmap, vmin=-0.5, vmax=0.5)
-        # plt.show()
-        # plt.close(f)
 
         cost, mse, _ = self._tf_dict['sess'].run([self._tf_dict['cost'],
                                                   self._tf_dict['mse'],
