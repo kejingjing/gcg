@@ -37,10 +37,10 @@ class CarEnv(DirectObject):
 
         # Defines base, render, loader
 
-        try:
-            ShowBase()
-        except:
-            pass
+        # try:
+        ShowBase()
+        # except:
+        #     pass
         
         base.setBackgroundColor(0.0, 0.0, 0.0, 1)
 

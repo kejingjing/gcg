@@ -1,7 +1,9 @@
+import numpy as np
 import tensorflow as tf
 
 from sandbox.gkahn.gcg.tf import rnn_cell
 from sandbox.gkahn.gcg.tf.weight_norm import fully_connected_weight_norm, conv2d_weight_norm
+from sandbox.gkahn.gcg.tf.concrete_dropout import ConcreteDropout
 
 def convnn(
         inputs,
@@ -127,7 +129,8 @@ def fcnn(
         reuse=False,
         is_training=True,
         T=None,
-        global_step_tensor=None):
+        global_step_tensor=None,
+        is_concrete_dropout=False):
     if 'hidden_activation' not in params:
         hidden_activation = None
     elif params['hidden_activation'] == 'relu':
@@ -157,6 +160,8 @@ def fcnn(
     hidden_layers = params.get('hidden_layers', [])
     output_dim = params['output_dim']
     dropout = params.get('dropout', None)
+    if is_concrete_dropout and dropout is None:
+        dropout = 0.1  # rowan's overriding hack (note: specific value not used)
     normalizer = params.get('normalizer', None)
     if dp_masks is not None or dropout is None:
         dp_return_masks = None
@@ -201,6 +206,19 @@ def fcnn(
                 raise NotImplementedError(
                     'Normalizer {0} is not valid'.format(normalizer))
 
+            if is_concrete_dropout:
+                # import IPython; IPython.embed()
+
+                num_data = params['num_data']  # temporary hack havving this in the .yaml file
+                input_dim = inputs.get_shape()[1].value
+                concrete_layer_name = "concrete-fcnn-{}".format(i)
+                # temp = 0.25  # TODO(rowan) debugging only, delete later!
+                # concrete_dropout = ConcreteDropout(concrete_layer_name, num_data, input_dim, concrete_temperature=temp)
+                concrete_dropout = ConcreteDropout(concrete_layer_name, num_data, input_dim)
+                weight_regularizer_scale = concrete_dropout.get_weight_regularizer_scale()
+            else:
+                weight_regularizer_scale = 0.5
+
             if normalizer == 'weight_norm':
                 next_layer_input = fully_connected_weight_norm(
                     inputs=next_layer_input,
@@ -218,7 +236,7 @@ def fcnn(
                     normalizer_params=normalizer_params,
                     weights_initializer=tf.contrib.layers.xavier_initializer(dtype=dtype),
                     biases_initializer=tf.constant_initializer(0., dtype=dtype),
-                    weights_regularizer=tf.contrib.layers.l2_regularizer(0.5),
+                    weights_regularizer=tf.contrib.layers.l2_regularizer(weight_regularizer_scale),
                     trainable=True)
             else:
                 fc_out = tf.contrib.layers.fully_connected(
@@ -226,7 +244,7 @@ def fcnn(
                     num_outputs=dim,
                     activation_fn=activation,
                     weights_initializer=tf.contrib.layers.xavier_initializer(dtype=dtype),
-                    weights_regularizer=tf.contrib.layers.l2_regularizer(0.5),
+                    weights_regularizer=tf.contrib.layers.l2_regularizer(weight_regularizer_scale),
                     trainable=True)
                 fc_out_reshape = tf.reshape(fc_out, (-1, T * fc_out.get_shape()[1].value))
                 bn_out = tf.contrib.layers.batch_norm(fc_out_reshape, **normalizer_params)
@@ -245,8 +263,11 @@ def fcnn(
                     else:
                         sample = distribution.sample(shape)
                     sample = tf.reshape(sample, (-1, dim))
-                    mask = tf.cast(sample < dropout, dtype) / dropout
-                    next_layer_input = next_layer_input * mask
+                    if is_concrete_dropout:
+                        next_layer_input, mask = concrete_dropout.apply_soft_dropout_mask(next_layer_input, sample)
+                    else:
+                        mask = tf.cast(sample < dropout, dtype) / dropout
+                        next_layer_input = next_layer_input * mask
                     dp_return_masks.append(mask)
 
         output = next_layer_input

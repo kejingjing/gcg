@@ -3,6 +3,8 @@ import glob
 import os
 import yaml
 
+import numpy as np
+import tensorflow as tf
 import rllab.misc.logger as rllab_logger
 
 from sandbox.gkahn.gcg.utils import logger
@@ -12,6 +14,7 @@ from sandbox.gkahn.gcg.sampler.replay_pool import ReplayPool
 
 ### models
 from sandbox.gkahn.gcg.policies.rccar_mac_policy import RCcarMACPolicy
+# from sandbox.gkahn.gcg.policies.rccar_mac_policy import ours #TODO(rowan)
 # TODO: import new models
 
 class EvalOffline(object):
@@ -152,22 +155,79 @@ class EvalOffline(object):
     ### Evaluate ###
     ################
 
+    @staticmethod
+    def plot_dropout(outputs, rewards, num_sample=10):
+        """
+        outputs: num_dropout x sample_size x action_len-1
+        rewards: sample_size x action_len
+        :return:
+        """
+        import matplotlib.pyplot as plt
+        num_sample = min(num_sample, outputs.shape[1])
+        num_time = outputs.shape[2]
+        i = 0
+        for i_sample in range(num_sample):
+            for i_time in range(num_time):
+                x = outputs[:, i_sample, i_time]
+                i += 1
+                plt.subplot(num_sample,num_time,i)
+                color = 'b' if rewards[i_sample, i_time] == 0 else 'r'
+                plt.hist(x, 20, range=(-1.,0.), color=color)
+                if i_sample == 0:
+                    plt.title("t = {}".format(i_time))
+                if i_time == 0:
+                    plt.ylabel("sample {}".format(i_sample+1))
+
+                # plot ground truth
+                # if rewards[i_sample, i_time] != 0:
+                #     plt.axvline(rewards[i_sample, i_time], color='r', linewidth=2)
+        plt.show()
+
+    @staticmethod
+    def clean_rewards(rewards):
+        """
+
+        :param rewards: sample_size x action_len. format (negative) 0000010000
+        :return: returns rewards                  format (negative) 0000011111
+        """
+        import numpy as np
+        for reward_row in rewards:
+            i = np.where(reward_row==-1)[0]
+            if i.size > 0:
+                i = min(i)
+                reward_row[i:] = -1
+        return rewards
+
     def evaluate(self):
         logger.info('Evaluating model')
 
         ### sample from the data, get the outputs
-        steps, observations, actions, rewards, values, dones, logprobs = self._replay_pool.sample(10)
+        sample_size = 10
+        steps, observations, actions, rewards, values, dones, logprobs = self._replay_pool.sample(sample_size)
+        # import IPython; IPython.embed()
         observations = observations[:, :self._model.obs_history_len, :]
-        outputs = self._model.get_model_outputs(observations, actions)
 
-        # TODO: do some kind of analysis
+        num_dropout = 1000
+        outputs = []
+        for _ in range(num_dropout):
+            outputs.append(self._model.get_model_outputs(observations, actions))
+        outputs = np.asarray(outputs)  # num_dropout x sample_size x action_len
+
+        rewards = EvalOffline.clean_rewards(rewards)
+        EvalOffline.plot_dropout(outputs, rewards)
+
+        import IPython; IPython.embed()
+
+        # TODO(rowan)
+        print("TODO: Rowan do some kind of analysis here.")
+        # outputs vs rewards
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('yaml', type=str, help='yaml file with all parameters')
     parser.add_argument('--no_train', action='store_true', help='do not train model on data')
     parser.add_argument('-yamldir', type=str, default=os.path.join(os.path.expanduser('~'),
-                                                                   'code/rllab/data/local/offline'))
+                                                                   'code/gcg/data/local/offline'))
     args = parser.parse_args()
 
     yaml_path = os.path.join(args.yamldir, args.yaml)
