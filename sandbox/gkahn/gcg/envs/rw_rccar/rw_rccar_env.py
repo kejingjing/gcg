@@ -73,7 +73,7 @@ class RWrccarEnv:
         params.setdefault('dt', 0.25)
         params.setdefault('horizon', int(5. * 60. / params['dt'])) # 5 minutes worth
         params.setdefault('ros_namespace', '/rccar/')
-        params.setdefault('obs_shape', (64, 36))
+        params.setdefault('obs_shape', (36, 64, 1))
         params.setdefault('steer_limits', [-1., 1.])
         params.setdefault('speed_limits', [0.2, 0.2])
         params.setdefault('backup_motor', -0.22)
@@ -89,6 +89,7 @@ class RWrccarEnv:
         self.action_space = Box(low=np.array([params['steer_limits'][0], params['speed_limits'][0]]),
                                 high=np.array([params['steer_limits'][1], params['speed_limits'][1]]))
         self.observation_space = Box(low=0, high=255, shape=params['obs_shape'])
+        assert(self.observation_space.shape[-1] == 1 or self.observation_space.shape[-1] == 3)
 
         self._last_step_time = None
         self._is_collision = False
@@ -145,9 +146,15 @@ class RWrccarEnv:
         recon_pil_jpg = BytesIO(msg.data)
         recon_pil_arr = Image.open(recon_pil_jpg)
 
-        grayscale = recon_pil_arr.convert('L')
-        grayscale_resized = grayscale.resize(self.observation_space.shape, Image.ANTIALIAS)
-        im = np.array(grayscale_resized)
+        is_grayscale = (self.observation_space.shape[-1] == 1)
+        if is_grayscale:
+            grayscale = recon_pil_arr.convert('L')
+            grayscale_resized = grayscale.resize(self.observation_space.shape[:-1][::-1], Image.ANTIALIAS) #  b/c (width, height)
+            im = np.expand_dims(np.array(grayscale_resized), 2)
+        else:
+            # rgb = np.array(recon_pil_arr)
+            rgb_resized = recon_pil_arr.resize(self.observation_space.shape[:-1][::-1], Image.ANTIALIAS) # b/c (width, height)
+            im = np.array(rgb_resized)
 
         return im
 

@@ -1,7 +1,6 @@
 import numpy as np
 import tensorflow as tf
 
-from rllab.core.serializable import Serializable
 from rllab.misc import ext
 
 from sandbox.gkahn.gcg.policies.mac_policy import MACPolicy
@@ -11,10 +10,8 @@ from sandbox.gkahn.gcg.tf import networks
 
 from sandbox.rocky.tf.spaces.discrete import Discrete
 
-class RCcarMACPolicy(MACPolicy, Serializable):
+class RCcarMACPolicy(MACPolicy):
     def __init__(self, **kwargs):
-        Serializable.quick_init(self, locals())
-
         self._speed_weight = kwargs['speed_weight']
         self._is_classification = kwargs['is_classification']
         self._probcoll_strictly_increasing = kwargs['probcoll_strictly_increasing']

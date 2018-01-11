@@ -6,25 +6,22 @@ from sklearn.utils.extmath import cartesian
 
 import tensorflow as tf
 
-from rllab.core.serializable import Serializable
 import rllab.misc.logger as rllab_logger
 from rllab.misc import ext
 
 from sandbox.rocky.tf.spaces.discrete import Discrete
-from sandbox.gkahn.tf.core.parameterized import Parameterized
 from sandbox.gkahn.tf.core import xplatform
 from sandbox.gkahn.gcg.utils import schedules
 from sandbox.gkahn.gcg.tf import tf_utils
 from sandbox.gkahn.gcg.tf import networks
+from sandbox.gkahn.gcg.utils import logger
 
 ### exploration strategies
 from sandbox.gkahn.gcg.exploration_strategies.epsilon_greedy_strategy import EpsilonGreedyStrategy
 from sandbox.gkahn.gcg.exploration_strategies.gaussian_strategy import GaussianStrategy
 
-class MACPolicy(Parameterized, Serializable):
+class MACPolicy(object):
     def __init__(self, **kwargs):
-        Serializable.quick_init(self, locals())
-
         ### environment
         self._env_spec = kwargs['env_spec']
 
@@ -78,8 +75,6 @@ class MACPolicy(Parameterized, Serializable):
 
         ### logging
         self._log_stats = defaultdict(list)
-
-        Parameterized.__init__(self, sess=self._tf_dict['sess'])
 
         assert((self._N == 1 and self._H == 1) or
                (self._N > 1 and self._H == 1) or
@@ -206,14 +201,11 @@ class MACPolicy(Parameterized, Serializable):
 
         with tf.name_scope('obs_to_lowd'):
             ### whiten observations
-            obs_dim = self._env_spec.observation_space.flat_dim
-            if tf_obs_ph.dtype != tf.float32:
-                tf_obs_ph = tf.cast(tf_obs_ph, tf.float32)
-            tf_obs_ph = tf.reshape(tf_obs_ph, (-1, self._obs_history_len * obs_dim))
+            obs_shape = self._env_spec.observation_space.shape
+
             if self._obs_is_im:
-                tf_obs_whitened = tf.multiply(tf_obs_ph -
-                                              tf.tile(tf_preprocess['observations_mean_var'], (1, self._obs_history_len)),
-                                              tf.tile(tf_preprocess['observations_orth_var'], (self._obs_history_len,)))
+                assert(tf_obs_ph.dtype == tf.uint8)
+                tf_obs_whitened = (tf.cast(tf_obs_ph, tf.float32) - 128.) / 128.
             else:
                 raise NotImplementedError
                 tf_obs_whitened = tf_obs_ph
@@ -221,14 +213,24 @@ class MACPolicy(Parameterized, Serializable):
                 #                             tf.tile(tf_preprocess['observations_mean_var'], (1, self._obs_history_len)),
                 #                             tf_utils.block_diagonal(
                 #                                 [tf_preprocess['observations_orth_var']] * self._obs_history_len))
-            tf_obs_whitened = tf.reshape(tf_obs_whitened, (-1, self._obs_history_len, obs_dim))
 
             ### obs --> lower dimensional space
             if self._image_graph is not None:
-                obs_shape = [self._obs_history_len] + list(self._env_spec.observation_space.shape)[:2]
-                layer = tf.transpose(tf.reshape(tf_obs_whitened, [-1] + list(obs_shape)), perm=(0, 2, 3, 1))
-                layer, _ = networks.convnn(layer, self._image_graph, is_training=is_training, scope='obs_to_lowd_convnn', global_step_tensor=self.global_step)
+                layer = tf_obs_whitened
+                # [batch_size, hist_len, height, width, channels]
+
+                layer = tf.reshape(layer, [-1] + list(obs_shape))
+                # [batch_size * hist_len, height, width, channels]
+
+                self._tf_debug['images'] = layer
+
+                layer, _ = networks.convnn(layer, self._image_graph, is_training=is_training,
+                                           scope='obs_to_lowd_convnn', global_step_tensor=self.global_step)
                 layer = layers.flatten(layer)
+                # pass through cnn to get [batch_size * hist_len, ??]
+
+                layer = tf.reshape(layer, (-1, self._obs_history_len * layer.get_shape()[1].value))
+                # [batch_size, hist_len, ??]
             else:
                 layer = layers.flatten(tf_obs_whitened)
 
@@ -490,13 +492,16 @@ class MACPolicy(Parameterized, Serializable):
     def _graph_optimize(self, tf_cost, tf_policy_vars):
         tf_lr_ph = tf.placeholder(tf.float32, (), name="learning_rate")
         update_ops = tf.get_collection(tf.GraphKeys.UPDATE_OPS)
+        num_parameters = 0
         with tf.control_dependencies(update_ops):
             optimizer = tf.train.AdamOptimizer(learning_rate=tf_lr_ph, epsilon=1e-4)
             gradients = optimizer.compute_gradients(tf_cost, var_list=tf_policy_vars)
             for i, (grad, var) in enumerate(gradients):
+                num_parameters += int(np.prod(var.get_shape().as_list()))
                 if grad is not None:
                     gradients[i] = (tf.clip_by_norm(grad, self._grad_clip_norm), var)
             tf_opt = optimizer.apply_gradients(gradients, global_step=self.global_step)
+        logger.debug('Number of parameters: {0:e}'.format(float(num_parameters)))
         return tf_opt, tf_lr_ph
 
     def _graph_init_vars(self, tf_sess):
@@ -716,13 +721,27 @@ class MACPolicy(Parameterized, Serializable):
         if self._use_target:
             feed_dict[self._tf_dict['obs_target_ph']] = observations
 
-
-
         # keys = sorted(self._tf_debug.keys())
         # values = self._tf_dict['sess'].run([self._tf_debug[k] for k in keys], feed_dict=feed_dict)
         # d = dict([(k, v) for k, v in zip(keys, values)])
+        #
         # import IPython; IPython.embed()
-
+        #
+        # import matplotlib.pyplot as plt
+        # f, axes = plt.subplots(1, self._obs_history_len, figsize=(12,3))
+        # for i in range(self._obs_history_len):
+        #     im = d['images'][4*3+i]
+        #     if self._env_spec.observation_space.shape[-1] == 1:
+        #         cmap = 'Greys_r'
+        #         im = im[:,:,0]
+        #     else:
+        #         cmap = None
+        #
+        #     im = np.clip((128 *im) + 128, 0, 255).astype(np.uint8)
+        #
+        #     axes[i].imshow(im, cmap=cmap, vmin=-0.5, vmax=0.5)
+        # plt.show()
+        # plt.close(f)
 
         cost, mse, _ = self._tf_dict['sess'].run([self._tf_dict['cost'],
                                                   self._tf_dict['mse'],
@@ -802,10 +821,6 @@ class MACPolicy(Parameterized, Serializable):
     ######################
     ### Saving/loading ###
     ######################
-
-    def get_params_internal(self, **tags):
-        with self._tf_dict['graph'].as_default():
-            return sorted(tf.get_collection(xplatform.global_variables_collection_name()), key=lambda v: v.name)
 
     def save(self, ckpt_name, train=True):
         saver = self._tf_dict['saver_train'] if train else self._tf_dict['saver_inference']
