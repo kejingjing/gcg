@@ -1,10 +1,11 @@
 import numpy as np
 import tensorflow as tf
 
+from avillaflor.gcg.envs.spaces.discrete import Discrete
 from avillaflor.gcg.policies.mac_policy import MACPolicy
-from avillaflor.gcg.tf import tf_utils
 from avillaflor.gcg.tf import networks
-from avillaflor.tf.spaces.discrete import Discrete
+from avillaflor.gcg.tf import tf_utils
+
 
 class RCcarMACPolicy(MACPolicy):
     def __init__(self, **kwargs):

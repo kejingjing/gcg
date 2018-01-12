@@ -1,17 +1,11 @@
-import os, time
+import os
 import argparse
 import yaml
 
-from rllab import config
 from avillaflor.gcg.algos.gcg import run_gcg
-from rllab.misc.instrument import stub, run_experiment_lite
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--exps', nargs='+')
-parser.add_argument('-mode', type=str, default='local')
-parser.add_argument('--confirm_remote', action='store_false')
-parser.add_argument('--dry', action='store_true')
-parser.add_argument('-region', type=str, choices=('us-west-1', 'us-west-2', 'us-east-1', 'us-east-2'), default='us-west-1')
 args = parser.parse_args()
 
 for exp in args.exps:
@@ -24,12 +18,4 @@ for exp in args.exps:
     params['txt'] = params_txt
     params['exp_name'] = '{0}/seed_{1}'.format(params['exp_name'], params['seed'])
 
-    run_experiment_lite(
-        run_gcg,
-        snapshot_mode="all",
-        exp_name=params['exp_name'],
-        exp_prefix=params['exp_prefix'],
-        variant=params,
-        use_gpu=True,
-        use_cloudpickle=True,
-    )
+    run_gcg(params)

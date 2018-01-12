@@ -1,7 +1,8 @@
-from avillaflor.spaces.base import Space
 import numpy as np
-from avillaflor.misc import special
 import tensorflow as tf
+
+from avillaflor.gcg.envs.spaces import utils
+from avillaflor.gcg.envs.spaces.base import Space
 
 
 class Discrete(Space):
@@ -33,16 +34,16 @@ class Discrete(Space):
         return self.n == other.n
 
     def flatten(self, x):
-        return special.to_onehot(x, self.n)
+        return utils.to_onehot(x, self.n)
 
     def unflatten(self, x):
-        return special.from_onehot(x)
+        return utils.from_onehot(x)
 
     def flatten_n(self, x):
-        return special.to_onehot_n(x, self.n)
+        return utils.to_onehot_n(x, self.n)
 
     def unflatten_n(self, x):
-        return special.from_onehot_n(x)
+        return utils.from_onehot_n(x)
 
     @property
     def default_value(self):
@@ -53,7 +54,7 @@ class Discrete(Space):
         return self.n
 
     def weighted_sample(self, weights):
-        return special.weighted_sample(weights, range(self.n))
+        return utils.weighted_sample(weights, range(self.n))
 
     def new_tensor_variable(self, name, extra_dims):
         # needed for safe conversion to float32

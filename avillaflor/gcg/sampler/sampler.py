@@ -1,17 +1,15 @@
-import os, pickle, joblib
 import itertools
+import pickle
+
 import numpy as np
+from avillaflor.gcg.envs.spaces.discrete import Discrete
 
-from rllab.misc.ext import get_seed
-
-from avillaflor.tf.envs.vec_env_executor import VecEnvExecutor
-
-from avillaflor.gcg.sampler.replay_pool import ReplayPool
-from avillaflor.gcg.utils import utils
 from avillaflor.gcg.envs.env_utils import create_env
-from avillaflor.tf.spaces.discrete import Discrete
-from avillaflor.tf.spaces.box import Box
+from avillaflor.gcg.envs.spaces.box import Box
+from avillaflor.gcg.envs.vec_env_executor import VecEnvExecutor
+from avillaflor.gcg.sampler.replay_pool import ReplayPool
 from avillaflor.gcg.utils import mypickle
+
 
 class Sampler(object):
     def __init__(self, policy, env, n_envs, replay_pool_size, max_path_length, sampling_method,
@@ -42,10 +40,7 @@ class Sampler(object):
             except:
                 envs = [create_env(env_str) for _ in range(self._n_envs)] if self._n_envs > 1 else [env]
         ### need to seed each environment if it is GymEnv
-#        seed = get_seed()
-#        if seed is not None and isinstance(utils.inner_env(env), GymEnv):
-#            for i, env in enumerate(envs):
-#                utils.inner_env(env).env.seed(seed + i)
+        # TODO: set seed
         self._vec_env = VecEnvExecutor(
             envs=envs,
             max_path_length=max_path_length

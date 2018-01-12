@@ -1,29 +1,29 @@
-import time
-import numpy as np
 import sys
 from math import pi
-import cv2
 
-from avillaflor.tf.spaces.box import Box
-from avillaflor.envs.env_spec import EnvSpec
-from avillaflor.gcg.envs.rccar.panda3d_camera_sensor import Panda3dCameraSensor
+import cv2
+import numpy as np
 from direct.showbase.DirectObject import DirectObject
 from direct.showbase.ShowBase import ShowBase
-from panda3d.core import loadPrcFileData
-from panda3d.core import AmbientLight
-from panda3d.core import DirectionalLight
-from panda3d.core import Vec3
-from panda3d.core import Vec4
-from panda3d.core import Point3
-from panda3d.core import TransformState
-from panda3d.core import BitMask32
-from panda3d.bullet import BulletWorld
 from panda3d.bullet import BulletBoxShape
+from panda3d.bullet import BulletHelper
 from panda3d.bullet import BulletPlaneShape
 from panda3d.bullet import BulletRigidBodyNode
 from panda3d.bullet import BulletVehicle
-from panda3d.bullet import BulletHelper
+from panda3d.bullet import BulletWorld
 from panda3d.bullet import ZUp
+from panda3d.core import AmbientLight
+from panda3d.core import BitMask32
+from panda3d.core import Point3
+from panda3d.core import TransformState
+from panda3d.core import Vec3
+from panda3d.core import Vec4
+from panda3d.core import loadPrcFileData
+
+from avillaflor.envs.env_spec import EnvSpec
+from avillaflor.gcg.envs.rccar.panda3d_camera_sensor import Panda3dCameraSensor
+from avillaflor.gcg.envs.spaces.box import Box
+
 
 class CarEnv(DirectObject):
     def __init__(self, params={}):

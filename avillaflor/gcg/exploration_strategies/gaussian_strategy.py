@@ -1,6 +1,6 @@
 import numpy as np
 
-from avillaflor.tf.spaces.box import Box
+from avillaflor.gcg.envs.spaces.box import Box
 from avillaflor.gcg.utils import schedules
 
 class GaussianStrategy(object):

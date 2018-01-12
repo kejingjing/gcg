@@ -1,7 +1,8 @@
-from avillaflor.core.serializable import Serializable
-from avillaflor.spaces.base import Space
 import numpy as np
 import tensorflow as tf
+
+from avillaflor.gcg.envs.spaces.base import Space
+
 
 class Box(Space):
     """

@@ -1,9 +1,9 @@
 import os
+
 import numpy as np
-import cv2
 
 from avillaflor.gcg.envs.rccar.car_env import CarEnv
-from avillaflor.tf.spaces.box import Box
+
 
 class CylinderEnv(CarEnv):
 

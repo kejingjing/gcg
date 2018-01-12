@@ -1,25 +1,21 @@
 import os, glob
 import numpy as np
 
-from rllab.algos.base import RLAlgorithm
-from rllab.misc.overrides import overrides
-import rllab.misc.logger as rllab_logger
-from rllab import config
-
 from avillaflor.gcg.envs.env_utils import create_env
 from avillaflor.gcg.policies.mac_policy import MACPolicy
 from avillaflor.gcg.policies.rccar_mac_policy import RCcarMACPolicy
 from avillaflor.gcg.policies.rccar_sensors_mac_policy import RCcarSensorsMACPolicy
 from avillaflor.gcg.sampler.sampler import Sampler
 from avillaflor.gcg.utils.utils import timeit
-from avillaflor.gcg.utils import logger
+from avillaflor.gcg.utils.logger import logger
 from avillaflor.gcg.utils import mypickle
 from avillaflor.gcg.utils import utils
 
-class GCG(RLAlgorithm):
+class GCG(object):
 
     def __init__(self, **kwargs):
 
+        self._save_dir = kwargs['save_dir']
         self._env = utils.inner_env(kwargs['env'])
         self._policy = kwargs['policy']
 
@@ -82,10 +78,6 @@ class GCG(RLAlgorithm):
     #############
     ### Files ###
     #############
-
-    @property
-    def _save_dir(self):
-        return rllab_logger.get_snapshot_dir()
 
     def _train_rollouts_file_name(self, itr):
         return os.path.join(self._save_dir, 'itr_{0:04d}_train_rollouts.pkl'.format(itr))
@@ -213,7 +205,6 @@ class GCG(RLAlgorithm):
     ### Training methods ###
     ########################
 
-    @overrides
     def train(self):
         ### restore where we left off
         save_itr = self._restore()
@@ -279,14 +270,14 @@ class GCG(RLAlgorithm):
 
                 ### log
                 if step % self._log_every_n_steps == 0:
-                    logger.info('step %.3e' % step)
-                    rllab_logger.record_tabular('Step', step)
+                    logger.record_tabular('Step', step)
                     self._sampler.log()
                     self._eval_sampler.log(prefix='Eval')
                     self._policy.log()
-                    rllab_logger.dump_tabular(with_prefix=False)
+                    logger.dump_tabular(print_func=logger.info)
                     timeit.stop('total')
-                    logger.debug('\n'+str(timeit))
+                    for line in str(timeit).split('\n'):
+                        logger.debug(line)
                     timeit.reset()
                     timeit.start('total')
 
@@ -300,19 +291,21 @@ class GCG(RLAlgorithm):
         self._save(save_itr, self._sampler.get_recent_paths(), eval_rollouts)
 
 def run_gcg(params):
-    logger.setup_logger(os.path.join(rllab_logger.get_snapshot_dir(), 'log.txt'),
-                        params['log_level'])
+    save_dir = os.path.realpath(os.path.join(os.path.dirname(os.path.realpath(__file__)), '../data/local', params['exp_name']))
+    os.makedirs(save_dir, exist_ok=True)
+    logger.setup(os.path.join(save_dir, 'log.txt'), params['log_level'])
+
+    # TODO: set seed
 
     # copy yaml for posterity
     try:
-        yaml_path = os.path.join(rllab_logger.get_snapshot_dir(), '{0}.yaml'.format(params['exp_name']))
+        yaml_path = os.path.join(save_dir, '{0}.yaml'.format(params['exp_name']))
         with open(yaml_path, 'w') as f:
             f.write(params['txt'])
     except:
         pass
 
     os.environ["CUDA_VISIBLE_DEVICES"] = str(params['policy']['gpu_device'])  # TODO: hack so don't double GPU
-    config.USE_TF = True
 
     env_str = params['alg'].pop('env')
     env = create_env(env_str, seed=params['seed'])
@@ -347,6 +340,7 @@ def run_gcg(params):
     else:
         max_path_length = env.horizon
     algo = GCG(
+        save_dir=save_dir,
         env=env,
         env_eval=env_eval,
         policy=policy,

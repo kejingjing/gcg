@@ -1,86 +1,132 @@
-import os
+import os, csv
 import logging
 from colorlog import ColoredFormatter
 
-_color_formatter = ColoredFormatter(
-    "%(asctime)s %(log_color)s%(name)-10s %(levelname)-8s%(reset)s %(white)s%(message)s",
-    datefmt='%m-%d %H:%M:%S',
-    reset=True,
-    log_colors={
-        'DEBUG':    'cyan',
-        'INFO':     'green',
-        'WARNING':  'yellow',
-        'ERROR':    'red',
-        'CRITICAL': 'red,bg_white',
-    },
-    secondary_log_colors={},
-    style='%'
-)
+from avillaflor.gcg.utils.tabulate import tabulate
 
-_normal_formatter = logging.Formatter(
-    '%(asctime)s %(name)-10s %(levelname)-8s %(message)s',
-    datefmt='%m-%d %H:%M:%S',
-    style='%'
-)
+class LoggerClass(object):
+    GLOBAL_LOGGER_NAME = '_global_logger'
 
-DEBUG_LOG_PATH = '/tmp/log.txt'
-def _set_log_path(path):
-    global DEBUG_LOG_PATH
-    DEBUG_LOG_PATH = path
+    _color_formatter = ColoredFormatter(
+        "%(asctime)s %(log_color)s%(name)-10s %(levelname)-8s%(reset)s %(white)s%(message)s",
+        datefmt='%m-%d %H:%M:%S',
+        reset=True,
+        log_colors={
+            'DEBUG': 'cyan',
+            'INFO': 'green',
+            'WARNING': 'yellow',
+            'ERROR': 'red',
+            'CRITICAL': 'red,bg_white',
+        },
+        secondary_log_colors={},
+        style='%'
+    )
 
-_LOGGERS = {}
-def _get_logger(name, lvl=logging.INFO, log_path=DEBUG_LOG_PATH, display_name=None):
-    global _LOGGERS
+    _normal_formatter = logging.Formatter(
+        '%(asctime)s %(name)-10s %(levelname)-8s %(message)s',
+        datefmt='%m-%d %H:%M:%S',
+        style='%'
+    )
+    
+    def __init__(self):
+        self._logger = None
+        self._log_path = None
+        self._csv_path = None
+        self._tabular = list()
+        
+    #############
+    ### Setup ###
+    #############
+        
+    def setup(self, log_path, lvl):
+        display_name = os.path.dirname(log_path).split('/')[-1]
+        self._logger = self._get_logger(LoggerClass.GLOBAL_LOGGER_NAME,
+                                        log_path,
+                                        lvl=lvl,
+                                        display_name=display_name)
+        self._csv_path = os.path.splitext(log_path)[0] + '.csv'
 
-    if isinstance(lvl, str):
-        lvl = lvl.lower().strip()
-        if lvl == 'debug': lvl = logging.DEBUG
-        elif lvl == 'info': lvl = logging.INFO
-        elif lvl == 'warn' or lvl == 'warning': lvl = logging.WARN
-        elif lvl == 'error': lvl = logging.ERROR
-        elif lvl == 'fatal' or lvl == 'critical': lvl = logging.CRITICAL
-        else: raise ValueError('unknown logging level')
+    def _get_logger(self, name, log_path, lvl=logging.INFO, display_name=None):
+        if isinstance(lvl, str):
+            lvl = lvl.lower().strip()
+            if lvl == 'debug':
+                lvl = logging.DEBUG
+            elif lvl == 'info':
+                lvl = logging.INFO
+            elif lvl == 'warn' or lvl == 'warning':
+                lvl = logging.WARN
+            elif lvl == 'error':
+                lvl = logging.ERROR
+            elif lvl == 'fatal' or lvl == 'critical':
+                lvl = logging.CRITICAL
+            else:
+                raise ValueError('unknown logging level')
 
-    logger = _LOGGERS.get(name, None)
-    if logger is not None: return logger
+        file_handler = logging.FileHandler(log_path)
+        file_handler.setLevel(logging.DEBUG)
+        file_handler.setFormatter(LoggerClass._normal_formatter)
+        console_handler = logging.StreamHandler()
+        console_handler.setLevel(lvl)
+        console_handler.setFormatter(LoggerClass._color_formatter)
+        if display_name is None:
+            display_name = name
+        logger = logging.getLogger(display_name)
+        logger.setLevel(logging.DEBUG)
+        logger.addHandler(console_handler)
+        logger.addHandler(file_handler)
 
-    # file_handler = logging.FileHandler(GET_FILE_MAN().debug_log_path)
-    file_handler = logging.FileHandler(log_path)
-    file_handler.setLevel(logging.DEBUG)
-    file_handler.setFormatter(_normal_formatter)
-    console_handler = logging.StreamHandler()
-    console_handler.setLevel(lvl)
-    console_handler.setFormatter(_color_formatter)
-    if display_name is None:
-        display_name = name
-    logger = logging.getLogger(display_name)
-    logger.setLevel(logging.DEBUG)
-    logger.addHandler(console_handler)
-    logger.addHandler(file_handler)
-    _LOGGERS[name] = logger
-    return logger
+        return logger
 
-GLOBAL_LOGGER_NAME = '_global_logger'
-def setup_logger(log_path, lvl):
-    display_name = os.path.dirname(log_path).split('/')[-1]
-    _get_logger(GLOBAL_LOGGER_NAME, lvl=lvl, log_path=log_path, display_name=display_name)
+    ###############
+    ### Logging ###
+    ###############
 
-def debug(s):
-    assert (GLOBAL_LOGGER_NAME in _LOGGERS)
-    _LOGGERS[GLOBAL_LOGGER_NAME].debug(s)
+    def debug(self, s):
+        assert (self._logger is not None)
+        self._logger.debug(s)
 
-def info(s):
-    assert (GLOBAL_LOGGER_NAME in _LOGGERS)
-    _LOGGERS[GLOBAL_LOGGER_NAME].info(s)
+    def info(self, s):
+        assert (self._logger is not None)
+        self._logger.info(s)
 
-def warn(s):
-    assert (GLOBAL_LOGGER_NAME in _LOGGERS)
-    _LOGGERS[GLOBAL_LOGGER_NAME].warn(s)
+    def warn(self, s):
+        assert (self._logger is not None)
+        self._logger.warn(s)
 
-def error(s):
-    assert (GLOBAL_LOGGER_NAME in _LOGGERS)
-    _LOGGERS[GLOBAL_LOGGER_NAME].error(s)
+    def error(self, s):
+        assert (self._logger is not None)
+        self._logger.error(s)
 
-def critical(s):
-    assert (GLOBAL_LOGGER_NAME in _LOGGERS)
-    _LOGGERS[GLOBAL_LOGGER_NAME].critical(s)
+    def critical(self, s):
+        assert (self._logger is not None)
+        self._logger.critical(s)
+
+    ####################
+    ### Data logging ###
+    ####################
+
+    def record_tabular(self, key, val):
+        for k, v in self._tabular:
+            assert(str(key) != k)
+        self._tabular.append((str(key), str(val)))
+
+    def dump_tabular(self, print_func=None):
+        if len(self._tabular) == 0:
+            return ''
+
+        log_str = tabulate(self._tabular)
+
+        ### print
+        if print_func is not None:
+            for line in log_str.split('\n'):
+                print_func(line)
+
+        ### csv
+        mode = 'a' if os.path.exists(self._csv_path) else 'w'
+        with open(self._csv_path, mode) as f:
+            writer = csv.writer(f)
+            writer.writerow(dict(self._tabular))
+
+        self._tabular = list()
+
+logger = LoggerClass()

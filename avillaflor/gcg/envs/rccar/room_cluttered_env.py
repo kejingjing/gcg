@@ -1,14 +1,10 @@
 import os
-import numpy as np
 from math import pi
 
-from panda3d.core import BitMask32
-from panda3d.bullet import BulletHelper
-from panda3d.bullet import BulletRigidBodyNode
+import numpy as np
 
-from avillaflor.tf.spaces.box import Box
 from avillaflor.gcg.envs.rccar.square_env import SquareEnv
-from avillaflor.gcg.envs.rccar.car_env import CarEnv
+
 
 class RoomClutteredEnv(SquareEnv):
     def __init__(self, params={}):

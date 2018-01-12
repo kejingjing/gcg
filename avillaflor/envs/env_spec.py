@@ -1,8 +1,7 @@
-from avillaflor.core.serializable import Serializable
-from avillaflor.spaces.base import Space
+from avillaflor.gcg.envs.spaces.base import Space
 
 
-class EnvSpec(Serializable):
+class EnvSpec(object):
 
     def __init__(
             self,
@@ -14,7 +13,6 @@ class EnvSpec(Serializable):
         :type observation_vec_space: Space
         :type action_space: Space
         """
-        Serializable.quick_init(self, locals())
         self._observation_im_space = observation_im_space
         self._observation_vec_space = observation_vec_space
         self._action_space = action_space

@@ -1,18 +1,18 @@
 import os
 from collections import defaultdict
-import numpy as np
-from sklearn.utils.extmath import cartesian
-import tensorflow as tf
 
-import rllab.misc.logger as rllab_logger
-from rllab.misc import ext
-from avillaflor.tf.spaces.discrete import Discrete
-from avillaflor.gcg.utils import schedules
-from avillaflor.gcg.utils import logger
-from avillaflor.gcg.tf import tf_utils
-from avillaflor.gcg.tf import networks
+import numpy as np
+import tensorflow as tf
+from sklearn.utils.extmath import cartesian
+
+from avillaflor.gcg.envs.spaces.discrete import Discrete
 from avillaflor.gcg.exploration_strategies.epsilon_greedy_strategy import EpsilonGreedyStrategy
 from avillaflor.gcg.exploration_strategies.gaussian_strategy import GaussianStrategy
+from avillaflor.gcg.tf import networks
+from avillaflor.gcg.tf import tf_utils
+from avillaflor.gcg.utils import schedules
+from avillaflor.gcg.utils.logger import logger
+
 
 class MACPolicy(object):
     def __init__(self, **kwargs):
@@ -598,9 +598,6 @@ class MACPolicy(object):
         tf_graph = tf_sess.graph
 
         with tf_sess.as_default(), tf_graph.as_default():
-            if ext.get_seed() is not None:
-                ext.set_seed(ext.get_seed())
-
             ### create input output placeholders
             tf_obs_im_ph, tf_obs_vec_ph, tf_actions_ph, tf_dones_ph, tf_rewards_ph,\
             tf_obs_im_target_ph, tf_obs_vec_target_ph, tf_test_es_ph_dict, tf_episode_timesteps_ph = \
@@ -834,8 +831,8 @@ class MACPolicy(object):
     def log(self):
         for k in sorted(self._log_stats.keys()):
             if k == 'Depth':
-                rllab_logger.record_tabular(k+'Mean', np.mean(self._log_stats[k]))
-                rllab_logger.record_tabular(k+'Std', np.std(self._log_stats[k]))
+                logger.record_tabular(k+'Mean', np.mean(self._log_stats[k]))
+                logger.record_tabular(k+'Std', np.std(self._log_stats[k]))
             else:
-                rllab_logger.record_tabular(k, np.mean(self._log_stats[k]))
+                logger.record_tabular(k, np.mean(self._log_stats[k]))
         self._log_stats.clear()

@@ -3,7 +3,7 @@ import itertools
 from collections import defaultdict
 import numpy as np
 
-import rllab.misc.logger as logger
+from avillaflor.gcg.utils.logger import logger
 
 from avillaflor.gcg.utils.utils import timeit
 

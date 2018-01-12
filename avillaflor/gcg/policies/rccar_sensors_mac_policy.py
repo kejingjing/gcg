@@ -1,13 +1,11 @@
-from collections import defaultdict
 import numpy as np
 import tensorflow as tf
 
-from rllab.misc import ext
-
+from avillaflor.gcg.envs.spaces.discrete import Discrete
 from avillaflor.gcg.policies.mac_policy import MACPolicy
-from avillaflor.gcg.tf import tf_utils
 from avillaflor.gcg.tf import networks
-from avillaflor.tf.spaces.discrete import Discrete
+from avillaflor.gcg.tf import tf_utils
+
 
 class RCcarSensorsMACPolicy(MACPolicy):
     def __init__(self, **kwargs):
@@ -577,9 +575,6 @@ class RCcarSensorsMACPolicy(MACPolicy):
         tf_graph = tf_sess.graph
 
         with tf_sess.as_default(), tf_graph.as_default():
-            if ext.get_seed() is not None:
-                ext.set_seed(ext.get_seed())
-
             ### create input output placeholders
             tf_obs_im_ph, tf_obs_vec_ph, tf_actions_ph, tf_dones_ph, tf_rewards_ph, \
                 tf_obs_im_target_ph, tf_obs_vec_target_ph, tf_test_es_ph_dict, \
