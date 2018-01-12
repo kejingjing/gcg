@@ -3,22 +3,17 @@ import itertools
 import numpy as np
 
 from rllab.misc.ext import get_seed
-#from rllab.envs.gym_env import GymEnv
-
-try:
-    import gym_ple
-except:
-    pass
 
 from avillaflor.tf.envs.vec_env_executor import VecEnvExecutor
 
-from avillaflor.gcg.sampler.replay_pool import RNNCriticReplayPool
+from avillaflor.gcg.sampler.replay_pool import ReplayPool
 from avillaflor.gcg.utils import utils
 from avillaflor.gcg.envs.env_utils import create_env
 from avillaflor.tf.spaces.discrete import Discrete
 from avillaflor.tf.spaces.box import Box
+from avillaflor.gcg.utils import mypickle
 
-class RNNCriticSampler(object):
+class Sampler(object):
     def __init__(self, policy, env, n_envs, replay_pool_size, max_path_length, sampling_method,
                  save_rollouts=False, save_rollouts_observations=True, save_env_infos=False, env_str=None, replay_pool_params={}):
         self._policy = policy
@@ -26,25 +21,28 @@ class RNNCriticSampler(object):
 
         assert(self._n_envs == 1) # b/c policy reset
 
-        self._replay_pools = [RNNCriticReplayPool(env.spec,
-                                                  env.horizon,
-                                                  policy.N,
-                                                  policy.gamma,
-                                                  replay_pool_size // n_envs,
-                                                  obs_history_len=policy.obs_history_len,
-                                                  sampling_method=sampling_method,
-                                                  save_rollouts=save_rollouts,
-                                                  save_rollouts_observations=save_rollouts_observations,
-                                                  save_env_infos=save_env_infos,
-                                                  replay_pool_params=replay_pool_params)
+        self._replay_pools = [ReplayPool(env.spec,
+                                         env.horizon,
+                                         policy.N,
+                                         policy.gamma,
+                                         replay_pool_size // n_envs,
+                                         obs_history_len=policy.obs_history_len,
+                                         sampling_method=sampling_method,
+                                         save_rollouts=save_rollouts,
+                                         save_rollouts_observations=save_rollouts_observations,
+                                         save_env_infos=save_env_infos,
+                                         replay_pool_params=replay_pool_params)
                               for _ in range(n_envs)]
 
-        try:
-            envs = [pickle.loads(pickle.dumps(env)) for _ in range(self._n_envs)] if self._n_envs > 1 else [env]
-        except:
-            envs = [create_env(env_str) for _ in range(self._n_envs)] if self._n_envs > 1 else [env]
+        if self._n_envs == 1:
+            envs = [env]
+        else:
+            try:
+                envs = [pickle.loads(pickle.dumps(env)) for _ in range(self._n_envs)] if self._n_envs > 1 else [env]
+            except:
+                envs = [create_env(env_str) for _ in range(self._n_envs)] if self._n_envs > 1 else [env]
         ### need to seed each environment if it is GymEnv
-        seed = get_seed()
+#        seed = get_seed()
 #        if seed is not None and isinstance(utils.inner_env(env), GymEnv):
 #            for i, env in enumerate(envs):
 #                utils.inner_env(env).env.seed(seed + i)
@@ -52,7 +50,6 @@ class RNNCriticSampler(object):
             envs=envs,
             max_path_length=max_path_length
         )
-        self._curr_observations = self._vec_env.reset()
 
     @property
     def n_envs(self):
@@ -64,7 +61,7 @@ class RNNCriticSampler(object):
 
     @property
     def statistics(self):
-        return RNNCriticReplayPool.statistics_pools(self._replay_pools)
+        return ReplayPool.statistics_pools(self._replay_pools)
 
     def __len__(self):
         return sum([len(rp) for rp in self._replay_pools])
@@ -83,7 +80,6 @@ class RNNCriticSampler(object):
             encoded_observation = replay_pool.encode_recent_observation()
             encoded_observations_im.append(encoded_observation[0])
             encoded_observations_vec.append(encoded_observation[1])
-#            encoded_observations.append(replay_pool.encode_recent_observation())
 
         ### get actions
         if take_random_actions:
@@ -97,17 +93,18 @@ class RNNCriticSampler(object):
                 logprobs = [-np.sum(np.log(high - low))] * self._n_envs
             else:
                 raise NotImplementedError
+            action_infos = [{} for _ in range(self._n_envs)]
         else:
-            actions, est_values, logprobs, _ = self._policy.get_actions(
+            actions, est_values, logprobs, action_infos = self._policy.get_actions(
                 steps=list(range(step, step + self._n_envs)),
                 current_episode_steps=self._vec_env.current_episode_steps,
-#                observations=encoded_observations,
-                observations_im=encoded_observations_im,
-                observations_vec=encoded_observations_vec,
+                observations=(encoded_observations_im, encoded_observations_vec),
                 explore=explore)
 
         ### take step
         next_observations, rewards, dones, env_infos = self._vec_env.step(actions)
+        for env_info, action_info in zip(env_infos, action_infos):
+            env_info.update(action_info)
 
         if np.any(dones):
             self._policy.reset_get_action()
@@ -119,27 +116,36 @@ class RNNCriticSampler(object):
 
         self._curr_observations = next_observations
 
-    #####################
-    ### Add offpolicy ###
-    #####################
+    def trash_current_rollouts(self):
+        """ In case an error happens """
+        steps_removed = 0
+        for replay_pool in self._replay_pools:
+            steps_removed += replay_pool.trash_current_rollout()
+        return steps_removed
 
-    def _rollouts_file(self, folder, itr):
-        return os.path.join(folder, 'itr_{0:d}_rollouts.pkl'.format(itr))
+    def reset(self):
+        self._curr_observations = self._vec_env.reset()
+        for replay_pool in self._replay_pools:
+            replay_pool.force_done()
 
-    def add_offpolicy(self, offpolicy_folder, num_offpolicy):
-        step = 0
+    ####################
+    ### Add rollouts ###
+    ####################
+
+    def add_rollouts(self, rollout_filenames, max_to_add=None):
+        step = sum([len(replay_pool) for replay_pool in self._replay_pools])
         itr = 0
         replay_pools = itertools.cycle(self._replay_pools)
         done_adding = False
 
-        while os.path.exists(self._rollouts_file(offpolicy_folder, itr)):
-            rollouts = joblib.load(self._rollouts_file(offpolicy_folder, itr))['rollouts']
+        for fname in rollout_filenames:
+            rollouts = mypickle.load(fname)['rollouts']
             itr += 1
 
             for rollout, replay_pool in zip(rollouts, replay_pools):
                 r_len = len(rollout['dones'])
-                if step + r_len >= num_offpolicy:
-                    diff = num_offpolicy - step
+                if max_to_add is not None and step + r_len >= max_to_add:
+                    diff = max_to_add - step
                     for k in ('observations', 'actions', 'rewards', 'dones', 'logprobs'):
                         rollout[k] = rollout[k][:diff]
                     done_adding = True
@@ -162,16 +168,16 @@ class RNNCriticSampler(object):
         return np.any([replay_pool.can_sample() for replay_pool in self._replay_pools])
 
     def sample(self, batch_size):
-        return RNNCriticReplayPool.sample_pools(self._replay_pools, batch_size,
-                                                only_completed_episodes=self._policy.only_completed_episodes)
+        return ReplayPool.sample_pools(self._replay_pools, batch_size,
+                                       only_completed_episodes=self._policy.only_completed_episodes)
 
     ###############
     ### Logging ###
     ###############
 
     def log(self, prefix=''):
-        RNNCriticReplayPool.log_pools(self._replay_pools, prefix=prefix)
+        ReplayPool.log_pools(self._replay_pools, prefix=prefix)
 
     def get_recent_paths(self):
-        return RNNCriticReplayPool.get_recent_paths_pools(self._replay_pools)
+        return ReplayPool.get_recent_paths_pools(self._replay_pools)
 

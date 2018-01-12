@@ -2,18 +2,15 @@ from collections import defaultdict
 import numpy as np
 import tensorflow as tf
 
-from avillaflor.core.serializable import Serializable
 from rllab.misc import ext
 
 from avillaflor.gcg.policies.mac_policy import MACPolicy
 from avillaflor.gcg.tf import tf_utils
-from avillaflor.tf.core import xplatform
 from avillaflor.gcg.tf import networks
 from avillaflor.tf.spaces.discrete import Discrete
 
-class RCcarSensorsMACPolicy(MACPolicy, Serializable):
+class RCcarSensorsMACPolicy(MACPolicy):
     def __init__(self, **kwargs):
-        Serializable.quick_init(self, locals())
 
         #TODO
         self._output_dim = kwargs['output_dim']
@@ -27,40 +24,6 @@ class RCcarSensorsMACPolicy(MACPolicy, Serializable):
     ###########################
     ### TF graph operations ###
     ###########################
-
-    def _graph_input_output_placeholders(self):
-#        obs_shape = self._env_spec.observation_space.shape
-#        obs_dtype = tf.uint8 if len(obs_shape) > 1 else tf.float32
-#        obs_dim = self._env_spec.observation_space.flat_dim
-#        action_dim = self._env_spec.action_space.flat_dim
-        obs_im_shape = self._env_spec.observation_im_space.shape
-        obs_vec_shape = self._env_spec.observation_vec_space.shape
-        obs_im_dim = obs_im_shape[0] * obs_im_shape[1] * obs_im_shape[2]
-        obs_vec_dim = obs_vec_shape[0]
-        action_dim = self._env_spec.action_space.flat_dim
-        
-        with tf.variable_scope('input_output_placeholders'):
-            ### policy inputs
-            tf_obs_im_ph = tf.placeholder(tf.uint8, [None, self._obs_history_len, obs_im_dim], name='tf_obs_im_ph')
-            tf_obs_vec_ph = tf.placeholder(tf.float32, [None, self._obs_history_len, obs_vec_dim], name='tf_obs_vec_ph')
-            tf_actions_ph = tf.placeholder(tf.float32, [None, self._N + 1, action_dim], name='tf_actions_ph')
-            tf_dones_ph = tf.placeholder(tf.bool, [None, self._N], name='tf_dones_ph')
-            ### policy outputs
-            tf_rewards_ph = tf.placeholder(tf.float32, [None, self._N], name='tf_rewards_ph')
-            ### target inputs
-            tf_obs_im_target_ph = tf.placeholder(tf.uint8, [None, self._N + self._obs_history_len - 0, obs_im_dim], name='tf_obs_im_target_ph')
-            tf_obs_vec_target_ph = tf.placeholder(tf.float32, [None, self._N + self._obs_history_len - 0, obs_vec_dim], name='tf_obs_vec_target_ph')
-            ### policy exploration
-            tf_test_es_ph_dict = defaultdict(None)
-            if self._gaussian_es:
-                tf_test_es_ph_dict['gaussian'] = tf.placeholder(tf.float32, [None], name='tf_test_gaussian_es')
-            if self._epsilon_greedy_es:
-                tf_test_es_ph_dict['epsilon_greedy'] = tf.placeholder(tf.float32, [None], name='tf_test_epsilon_greedy_es')
-            ### episode timesteps
-            tf_episode_timesteps_ph = tf.placeholder(tf.int32, [None], name='tf_episode_timesteps')
-
-        return tf_obs_im_ph, tf_obs_vec_ph, tf_actions_ph, tf_dones_ph, tf_rewards_ph, tf_obs_im_target_ph, tf_obs_vec_target_ph, tf_test_es_ph_dict, tf_episode_timesteps_ph
-
 
     def _graph_extract_from_obs_vec_ph(self, tf_obs_vec_ph, tf_obs_vec_target_ph):
         # TODO Might not be handling target stuff correctly
@@ -120,74 +83,6 @@ class RCcarSensorsMACPolicy(MACPolicy, Serializable):
 
         return tf_obs_vec, tf_obs_vec_target, tf_final_add, tf_final_add_target, tf_goal_vec
     
-    def _graph_preprocess_placeholders(self):
-        tf_preprocess = dict()
-
-        with tf.variable_scope('preprocess'):
-            for name, dim, diag_orth in (('observations_im', self._env_spec.observation_im_space.flat_dim, True),
-                                         ('observations_vec', self._env_spec.observation_vec_space.flat_dim, False),
-                                         ('actions', self._env_spec.action_space.flat_dim, False),
-                                         ('rewards', 1, False)):
-                tf_preprocess[name+'_mean_ph'] = tf.placeholder(tf.float32, shape=(1, dim), name=name+'_mean_ph')
-                tf_preprocess[name+'_mean_var'] = tf.get_variable(name+'_mean_var', shape=[1, dim],
-                                                                  trainable=False, dtype=tf.float32,
-                                                                  initializer=tf.constant_initializer(np.zeros((1, dim))))
-                tf_preprocess[name+'_mean_assign'] = tf.assign(tf_preprocess[name+'_mean_var'],
-                                                               tf_preprocess[name+'_mean_ph'])
-
-                if diag_orth:
-                    tf_preprocess[name + '_orth_ph'] = tf.placeholder(tf.float32, shape=(dim,), name=name + '_orth_ph')
-                    tf_preprocess[name + '_orth_var'] = tf.get_variable(name + '_orth_var',
-                                                                        shape=(dim,),
-                                                                        trainable=False, dtype=tf.float32,
-                                                                        initializer=tf.constant_initializer(np.ones(dim)))
-                else:
-                    tf_preprocess[name + '_orth_ph'] = tf.placeholder(tf.float32, shape=(dim, dim), name=name + '_orth_ph')
-                    tf_preprocess[name + '_orth_var'] = tf.get_variable(name + '_orth_var',
-                                                                        shape=(dim, dim),
-                                                                        trainable=False, dtype=tf.float32,
-                                                                        initializer=tf.constant_initializer(np.eye(dim)))
-                tf_preprocess[name+'_orth_assign'] = tf.assign(tf_preprocess[name+'_orth_var'],
-                                                               tf_preprocess[name+'_orth_ph'])
-
-        return tf_preprocess
-
-    def _graph_obs_to_lowd(self, tf_obs_im_ph, tf_obs_vec, tf_preprocess, is_training):
-        import tensorflow.contrib.layers as layers
-
-        with tf.name_scope('obs_to_lowd'):
-            ### whiten observations
-            obs_im_dim = self._env_spec.observation_im_space.flat_dim
-            tf_obs_im_ph = tf.cast(tf_obs_im_ph, tf.float32)
-            tf_obs_im_ph = tf.reshape(tf_obs_im_ph, (-1, self._obs_history_len * obs_im_dim))
-            tf_obs_im_whitened = tf.multiply(tf_obs_im_ph -
-                                             tf.tile(tf_preprocess['observations_im_mean_var'], (1, self._obs_history_len)),
-                                             tf.tile(tf_preprocess['observations_im_orth_var'], (self._obs_history_len,)))
-                # tf_obs_whitened = tf.matmul(tf_obs_ph -
-                #                             tf.tile(tf_preprocess['observations_mean_var'], (1, self._obs_history_len)),
-                #                             tf_utils.block_diagonal(
-                #                                 [tf_preprocess['observations_orth_var']] * self._obs_history_len))
-            tf_obs_im_whitened = tf.reshape(tf_obs_im_whitened, (-1, self._obs_history_len, obs_im_dim))
-
-            ### obs --> lower dimensional space
-            if self._image_graph is not None:
-                obs_shape = [self._obs_history_len] + list(self._env_spec.observation_im_space.shape)[:2]
-                layer = tf.transpose(tf.reshape(tf_obs_im_whitened, [-1] + list(obs_shape)), perm=(0, 2, 3, 1))
-                layer, _ = networks.convnn(layer, self._image_graph, is_training=is_training, scope='obs_to_lowd_convnn', global_step_tensor=self.global_step)
-                layer = layers.flatten(layer)
-            else:
-                layer = layers.flatten(tf_obs_im_whitened)
-
-            ### obs --> internal state
-            if tf_obs_vec.get_shape()[1].value == 0:
-                fc_input = layer
-            else:
-                fc_input = tf.concat([layer, layers.flatten(tf_obs_vec)], axis=1)
-            tf_obs_lowd, _ = networks.fcnn(fc_input, self._observation_graph, is_training=is_training,
-                                           scope='obs_to_lowd_fcnn', global_step_tensor=self.global_step)
-
-        return tf_obs_lowd
-
     def _graph_inference(self, tf_obs_lowd, tf_final_add, tf_actions_ph, values_softmax, tf_preprocess, is_training, num_dp=1):
         """
         :param tf_obs_lowd: [batch_size, self._rnn_state_dim]
@@ -724,9 +619,9 @@ class RCcarSensorsMACPolicy(MACPolicy, Serializable):
             tf_get_action_explore = self._graph_get_action_explore(tf_get_action, tf_test_es_ph_dict)
 
             ### get policy variables
-            tf_policy_vars = sorted(tf.get_collection(xplatform.global_variables_collection_name(),
+            tf_policy_vars = sorted(tf.get_collection(tf.GraphKeys.GLOBAL_VARIABLES,
                                                       scope=policy_scope), key=lambda v: v.name)
-            tf_trainable_policy_vars = sorted(tf.get_collection(xplatform.trainable_variables_collection_name(),
+            tf_trainable_policy_vars = sorted(tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES,
                                                                 scope=policy_scope), key=lambda v: v.name)
 
             # TODO come back to target stuff later
@@ -734,9 +629,9 @@ class RCcarSensorsMACPolicy(MACPolicy, Serializable):
             if self._use_target:
                 target_scope = 'target' if self._separate_target_params else 'policy'
                 ### action selection
-                tf_obs_im_target_ph_packed = xplatform.concat([tf_obs_im_target_ph[:, h - self._obs_history_len:h, :]
-                                                              for h in range(self._obs_history_len, self._obs_history_len + self._N + 1)],
-                                                              0)
+                tf_obs_im_target_ph_packed = tf.concat([tf_obs_im_target_ph[:, h - self._obs_history_len:h, :]
+                                                        for h in range(self._obs_history_len, self._obs_history_len + self._N + 1)],
+                                                       0)
                 tf_target_get_action, tf_target_get_action_values, _ = self._graph_get_action(tf_obs_im_target_ph_packed,
                                                                                               tf_obs_vec_target_ph,
                                                                                               self._get_action_target,
@@ -755,7 +650,7 @@ class RCcarSensorsMACPolicy(MACPolicy, Serializable):
                 tf_policy_vars_nobatchnorm = list(
                     filter(lambda v: 'biased' not in v.name and 'local_step' not in v.name,
                            tf_policy_vars))
-                tf_target_vars = sorted(tf.get_collection(xplatform.global_variables_collection_name(),
+                tf_target_vars = sorted(tf.get_collection(tf.GraphKeys.GLOBAL_VARIABLES,
                                                           scope=target_scope), key=lambda v: v.name)
                 assert (len(tf_policy_vars_nobatchnorm) == len(tf_target_vars))
                 tf_update_target_fn = []
@@ -777,15 +672,15 @@ class RCcarSensorsMACPolicy(MACPolicy, Serializable):
             ### initialize
             self._graph_init_vars(tf_sess)
             
-            ### saver
-            tf_saver = tf.train.Saver()
+            ### savers
+            tf_saver_inference = tf.train.Saver(tf_policy_vars, max_to_keep=None)
+            tf_saver_train = tf.train.Saver(max_to_keep=None) if not self._inference_only else None
             
         # TODO
         ### what to return
         return {
             'sess': tf_sess,
             'graph': tf_graph,
-            'saver': tf_saver,
             'obs_im_ph': tf_obs_im_ph,
             'obs_vec_ph': tf_obs_vec_ph,
             'actions_ph': tf_actions_ph,
@@ -808,91 +703,16 @@ class RCcarSensorsMACPolicy(MACPolicy, Serializable):
             'opt': tf_opt,
             'lr_ph': tf_lr_ph,
             'policy_vars': tf_policy_vars,
-            'target_vars': tf_target_vars
+            'target_vars': tf_target_vars,
+            'saver_inference': tf_saver_inference,
+            'saver_train': tf_saver_train
         }
-    
-    ######################
-    ### Policy methods ###
-    ######################
-
-    def get_action(self, step, current_episode_step, observation_im, observation_vec, explore):
-        chosen_actions, chosen_values, action_info = self.get_actions([step], [current_episode_step] [observation_im],
-                                                                      [observation_vec], explore=explore)
-        return chosen_actions[0], chosen_values[0], action_info
-
-    def get_actions(self, steps, current_episode_steps, observations_im, observations_vec, explore):
-        d = {}
-        feed_dict = {
-#            self._tf_dict['obs_ph']: observations,
-            self._tf_dict['obs_im_ph']: observations_im,
-            self._tf_dict['obs_vec_ph']: observations_vec,
-            self._tf_dict['episode_timesteps_ph']: current_episode_steps
-        }
-        if explore:
-            if self._gaussian_es:
-                feed_dict[self._tf_dict['test_es_ph_dict']['gaussian']] = [self._gaussian_es.schedule.value(t) for t in steps]
-            if self._epsilon_greedy_es:
-                feed_dict[self._tf_dict['test_es_ph_dict']['epsilon_greedy']] = \
-                    [self._epsilon_greedy_es.schedule.value(t) for t in steps]
-
-            actions, values = self._tf_dict['sess'].run([self._tf_dict['get_action_explore'],
-                                                         self._tf_dict['get_action_value']],
-                                                        feed_dict=feed_dict)
-        else:
-            actions, values = self._tf_dict['sess'].run([self._tf_dict['get_action'],
-                                                         self._tf_dict['get_action_value']],
-                                                        feed_dict=feed_dict)
-
-        logprobs = [np.nan] * len(steps)
-
-        if isinstance(self._env_spec.action_space, Discrete):
-            actions = [int(a.argmax()) for a in actions]
-
-        return actions, values, logprobs, d
-
 
     ################
     ### Training ###
     ################
 
-    def update_preprocess(self, preprocess_stats):
-        obs_im_mean, obs_im_orth, obs_vec_mean, obs_vec_orth, actions_mean, actions_orth, rewards_mean, rewards_orth = \
-            preprocess_stats['observations_im_mean'], \
-            preprocess_stats['observations_im_orth'], \
-            preprocess_stats['observations_vec_mean'], \
-            preprocess_stats['observations_vec_orth'], \
-            preprocess_stats['actions_mean'], \
-            preprocess_stats['actions_orth'], \
-            preprocess_stats['rewards_mean'], \
-            preprocess_stats['rewards_orth']
-
-        tf_assigns = []
-        for key in ('observations_im_mean', 'observations_im_orth',
-                    'observations_vec_mean', 'observations_vec_orth',
-                    'actions_mean', 'actions_orth',
-                    'rewards_mean', 'rewards_orth'):
-            if self._preprocess_params[key]:
-                tf_assigns.append(self._tf_dict['preprocess'][key + '_assign'])
-
-        # we assume if obs is im, the obs orth is the diagonal of the covariance
-        self._tf_dict['sess'].run(tf_assigns,
-                          feed_dict={
-                              self._tf_dict['preprocess']['observations_im_mean_ph']: obs_im_mean,
-                              self._tf_dict['preprocess']['observations_im_orth_ph']: obs_im_orth,
-                              self._tf_dict['preprocess']['observations_vec_mean_ph']: obs_vec_mean,
-                              self._tf_dict['preprocess']['observations_vec_orth_ph']: obs_vec_orth,
-                              self._tf_dict['preprocess']['actions_mean_ph']: actions_mean,
-                              self._tf_dict['preprocess']['actions_orth_ph']: actions_orth,
-                              # self._tf_dict['preprocess']['rewards_mean_ph']: (self._N / float(self.N_output)) *  # reweighting!
-                              #                                        np.expand_dims(np.tile(rewards_mean, self.N_output),
-                              #                                                       0),
-                              # self._tf_dict['preprocess']['rewards_orth_ph']: (self._N / float(self.N_output)) *
-                              #                                        scipy.linalg.block_diag(
-                              #                                            *([rewards_orth] * self.N_output))
-                          })
-
-
-    def train_step(self, step, steps, observations_im, observations_vec, actions, rewards, values, dones, logprobs, use_target):
+    def train_step(self, step, steps, observations, actions, rewards, values, dones, logprobs, use_target):
         """
         :param steps: [batch_size, N+1]
         :param observations_im: [batch_size, N+1 + obs_history_len-1, obs_im_dim]
@@ -901,6 +721,7 @@ class RCcarSensorsMACPolicy(MACPolicy, Serializable):
         :param rewards: [batch_size, N+1]
         :param dones: [batch_size, N+1]
         """
+        observations_im, observations_vec = observations
         feed_dict = {
             ### parameters
             self._tf_dict['lr_ph']: self._lr_schedule.value(step),
@@ -914,7 +735,7 @@ class RCcarSensorsMACPolicy(MACPolicy, Serializable):
         feed_dict[self._tf_dict['obs_vec_target_ph']] = observations_vec
         if self._use_target:
             feed_dict[self._tf_dict['obs_im_target_ph']] = observations_im
-        
+
         cost, mse, costs, _ = self._tf_dict['sess'].run([self._tf_dict['cost'],
                                                         self._tf_dict['mse'],
                                                         self._tf_dict['costs'],
@@ -927,9 +748,3 @@ class RCcarSensorsMACPolicy(MACPolicy, Serializable):
         self._log_stats['reg cost'].append(cost - mse)
         for i, sensor in enumerate(self._output_sensors):
             self._log_stats['{0} cost'.format(sensor['name'])].append(costs[i])
-
-    def save_model(self, save_path):
-        self._tf_dict['saver'].save(self._tf_dict['sess'], save_path)
-
-    def restore_ckpt(self, ckpt_path):
-        self._tf_dict['saver'].restore(self._tf_dict['sess'], ckpt_path)

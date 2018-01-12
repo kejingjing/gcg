@@ -4,22 +4,18 @@ import numpy as np
 from sklearn.utils.extmath import cartesian
 import tensorflow as tf
 
-from avillaflor.core.serializable import Serializable
-import rllab.misc.logger as logger
+import rllab.misc.logger as rllab_logger
 from rllab.misc import ext
 from avillaflor.tf.spaces.discrete import Discrete
-from avillaflor.tf.policies.base import Policy
-from avillaflor.tf.core import xplatform
 from avillaflor.gcg.utils import schedules
+from avillaflor.gcg.utils import logger
 from avillaflor.gcg.tf import tf_utils
 from avillaflor.gcg.tf import networks
 from avillaflor.gcg.exploration_strategies.epsilon_greedy_strategy import EpsilonGreedyStrategy
 from avillaflor.gcg.exploration_strategies.gaussian_strategy import GaussianStrategy
 
-class MACPolicy(Policy, Serializable):
+class MACPolicy(object):
     def __init__(self, **kwargs):
-        Serializable.quick_init(self, locals())
-
         ### environment
         self._env_spec = kwargs['env_spec']
 
@@ -30,6 +26,7 @@ class MACPolicy(Policy, Serializable):
         self._obs_history_len = kwargs['obs_history_len'] # how many previous observations to use
 
         ### model architecture
+        self._inference_only = kwargs.get('inference_only', False)
         self._image_graph = kwargs['image_graph']
         self._observation_graph = kwargs['observation_graph']
         self._action_graph = kwargs['action_graph']
@@ -72,9 +69,6 @@ class MACPolicy(Policy, Serializable):
 
         ### logging
         self._log_stats = defaultdict(list)
-
-        Policy.__init__(self, self._env_spec, sess=self._tf_dict['sess'])
-#        Parameterized.__init__(self, sess=self._tf_dict['sess'])
 
         assert((self._N == 1 and self._H == 1) or
                (self._N > 1 and self._H == 1) or
@@ -140,20 +134,23 @@ class MACPolicy(Policy, Serializable):
         return tf_sess, tf_graph
 
     def _graph_input_output_placeholders(self):
-        obs_shape = self._env_spec.observation_space.shape
-        obs_dtype = tf.uint8 if len(obs_shape) > 1 else tf.float32
-        obs_dim = self._env_spec.observation_space.flat_dim
+        obs_im_shape = self._env_spec.observation_im_space.shape
+        obs_vec_shape = self._env_spec.observation_vec_space.shape
+        obs_im_dim = np.prod(obs_im_shape)
+        obs_vec_dim = np.prod(obs_vec_shape)
         action_dim = self._env_spec.action_space.flat_dim
 
         with tf.variable_scope('input_output_placeholders'):
             ### policy inputs
-            tf_obs_ph = tf.placeholder(obs_dtype, [None, self._obs_history_len, obs_dim], name='tf_obs_ph')
+            tf_obs_im_ph = tf.placeholder(tf.uint8, [None, self._obs_history_len, obs_im_dim], name='tf_obs_im_ph')
+            tf_obs_vec_ph = tf.placeholder(tf.float32, [None, self._obs_history_len, obs_vec_dim], name='tf_obs_vec_ph')
             tf_actions_ph = tf.placeholder(tf.float32, [None, self._N + 1, action_dim], name='tf_actions_ph')
             tf_dones_ph = tf.placeholder(tf.bool, [None, self._N], name='tf_dones_ph')
             ### policy outputs
             tf_rewards_ph = tf.placeholder(tf.float32, [None, self._N], name='tf_rewards_ph')
             ### target inputs
-            tf_obs_target_ph = tf.placeholder(obs_dtype, [None, self._N + self._obs_history_len - 0, obs_dim], name='tf_obs_target_ph')
+            tf_obs_im_target_ph = tf.placeholder(tf.uint8, [None, self._N + self._obs_history_len - 0, obs_im_dim], name='tf_obs_im_target_ph')
+            tf_obs_vec_target_ph = tf.placeholder(tf.float32, [None, self._N + self._obs_history_len - 0, obs_vec_dim], name='tf_obs_vec_target_ph')
             ### policy exploration
             tf_test_es_ph_dict = defaultdict(None)
             if self._gaussian_es:
@@ -163,13 +160,15 @@ class MACPolicy(Policy, Serializable):
             ### episode timesteps
             tf_episode_timesteps_ph = tf.placeholder(tf.int32, [None], name='tf_episode_timesteps')
 
-        return tf_obs_ph, tf_actions_ph, tf_dones_ph, tf_rewards_ph, tf_obs_target_ph, tf_test_es_ph_dict, tf_episode_timesteps_ph
+        return tf_obs_im_ph, tf_obs_vec_ph, tf_actions_ph, tf_dones_ph, tf_rewards_ph,\
+               tf_obs_im_target_ph, tf_obs_vec_target_ph, tf_test_es_ph_dict, tf_episode_timesteps_ph
 
     def _graph_preprocess_placeholders(self):
         tf_preprocess = dict()
 
         with tf.variable_scope('preprocess'):
-            for name, dim, diag_orth in (('observations', self._env_spec.observation_space.flat_dim, self._obs_is_im),
+            for name, dim, diag_orth in (('observations_im', self._env_spec.observation_im_space.flat_dim, True),
+                                         ('observations_vec', self._env_spec.observation_vec_space.flat_dim, False),
                                          ('actions', self._env_spec.action_space.flat_dim, False),
                                          ('rewards', 1, False)):
                 tf_preprocess[name+'_mean_ph'] = tf.placeholder(tf.float32, shape=(1, dim), name=name+'_mean_ph')
@@ -196,38 +195,43 @@ class MACPolicy(Policy, Serializable):
 
         return tf_preprocess
 
-    def _graph_obs_to_lowd(self, tf_obs_ph, tf_preprocess, is_training):
+    def _graph_obs_to_lowd(self, tf_obs_im_ph, tf_obs_vec_ph, tf_preprocess, is_training):
         import tensorflow.contrib.layers as layers
 
         with tf.name_scope('obs_to_lowd'):
             ### whiten observations
-            obs_dim = self._env_spec.observation_space.flat_dim
-            if tf_obs_ph.dtype != tf.float32:
-                tf_obs_ph = tf.cast(tf_obs_ph, tf.float32)
-            tf_obs_ph = tf.reshape(tf_obs_ph, (-1, self._obs_history_len * obs_dim))
-            if self._obs_is_im:
-                tf_obs_whitened = tf.multiply(tf_obs_ph -
-                                              tf.tile(tf_preprocess['observations_mean_var'], (1, self._obs_history_len)),
-                                              tf.tile(tf_preprocess['observations_orth_var'], (self._obs_history_len,)))
-            else:
-                raise NotImplementedError
-                tf_obs_whitened = tf_obs_ph
-                # tf_obs_whitened = tf.matmul(tf_obs_ph -
-                #                             tf.tile(tf_preprocess['observations_mean_var'], (1, self._obs_history_len)),
-                #                             tf_utils.block_diagonal(
-                #                                 [tf_preprocess['observations_orth_var']] * self._obs_history_len))
-            tf_obs_whitened = tf.reshape(tf_obs_whitened, (-1, self._obs_history_len, obs_dim))
+            obs_im_shape = self._env_spec.observation_im_space.shape
+            obs_im_dim = np.prod(obs_im_shape)
 
-            ### obs --> lower dimensional space
-            if self._image_graph is not None:
-                obs_shape = [self._obs_history_len] + list(self._env_spec.observation_space.shape)[:2]
-                layer = tf.transpose(tf.reshape(tf_obs_whitened, [-1] + list(obs_shape)), perm=(0, 2, 3, 1))
-                layer, _ = networks.convnn(layer, self._image_graph, is_training=is_training, scope='obs_to_lowd_convnn', global_step_tensor=self.global_step)
-                layer = layers.flatten(layer)
-            else:
-                layer = layers.flatten(tf_obs_whitened)
+            # TODO: assumes image is an input
+            assert (obs_im_dim > 0)
+            assert (self._image_graph is not None)
+            assert (tf_obs_im_ph.dtype == tf.uint8)
 
-            ### obs --> internal state
+            tf_obs_im_whitened = (tf.cast(tf_obs_im_ph, tf.float32) - 128.) / 128.
+
+            ### CNN
+
+            layer = tf.reshape(tf_obs_im_whitened, [-1, self._obs_history_len] + list(obs_im_shape))
+            # [batch_size, hist_len, height, width, channels]
+
+            layer = tf.reshape(layer, [-1] + list(obs_im_shape))
+            # [batch_size * hist_len, height, width, channels]
+
+            layer, _ = networks.convnn(layer, self._image_graph, is_training=is_training,
+                                       scope='obs_to_lowd_convnn', global_step_tensor=self.global_step)
+            layer = layers.flatten(layer)
+            # pass through cnn to get [batch_size * hist_len, ??]
+
+            layer = tf.reshape(layer, (-1, self._obs_history_len * layer.get_shape()[1].value))
+            # [batch_size, hist_len, ??]
+
+            ### FCNN
+
+            if tf_obs_vec_ph.get_shape()[1].value > 0:
+                obs_vec_dim = self._env_spec.observation_vec_space.flat_dim
+                layer = tf.concat([layer, tf.reshape(tf_obs_vec_ph, [-1, self._obs_history_len * obs_vec_dim])], axis=1)
+
             tf_obs_lowd, _ = networks.fcnn(layer, self._observation_graph, is_training=is_training,
                                            scope='obs_to_lowd_fcnn', global_step_tensor=self.global_step)
 
@@ -258,14 +262,18 @@ class MACPolicy(Policy, Serializable):
         rnn_outputs = tf.reshape(rnn_outputs, (-1, rnn_output_dim))
 
         self._output_graph.update({'output_dim': 1})
-        tf_nstep_rewards, _ = networks.fcnn(rnn_outputs, self._output_graph, is_training=is_training, scope='fcnn_rewards',
+        # rewards
+        tf_yhats, _ = networks.fcnn(rnn_outputs, self._output_graph, is_training=is_training, scope='fcnn_yhats',
                                             T=H, global_step_tensor=self.global_step, num_dp=num_dp)
-        tf_nstep_values, _ = networks.fcnn(rnn_outputs, self._output_graph, is_training=is_training, scope='fcnn_values',
+        tf_yhats = tf.reshape(tf_yhats, (-1, H))
+        # values
+        tf_bhats, _ = networks.fcnn(rnn_outputs, self._output_graph, is_training=is_training, scope='fcnn_bhats',
                                            T=H, global_step_tensor=self.global_step, num_dp=num_dp)
-        tf_nstep_rewards = tf.unstack(tf.reshape(tf_nstep_rewards, (-1, H)), axis=1)
-        tf_nstep_values = tf.unstack(tf.reshape(tf_nstep_values, (-1, H)), axis=1)
+        tf_bhats = tf.reshape(tf_bhats, (-1, H))
 
-        tf_values_list = [self._graph_calculate_value(h, tf_nstep_rewards, tf_nstep_values) for h in range(H)]
+        tf_values_list = [self._graph_calculate_value(h,
+                                                      tf.unstack(tf_yhats, axis=1),
+                                                      tf.unstack(tf_bhats, axis=1)) for h in range(H)]
         tf_values_list += [tf_values_list[-1]] * (N - H)
         tf_values = tf.stack(tf_values_list, 1)
 
@@ -284,7 +292,7 @@ class MACPolicy(Policy, Serializable):
 
         assert(tf_values.get_shape()[1].value == N)
 
-        return tf_values, tf_values_softmax, tf_nstep_rewards, tf_nstep_values
+        return tf_values, tf_values_softmax, tf_yhats, tf_bhats
 
     def _graph_calculate_value(self, n, tf_nstep_rewards, tf_nstep_values):
         tf_returns = tf_nstep_rewards[:n] + [tf_nstep_values[n]]
@@ -304,20 +312,22 @@ class MACPolicy(Policy, Serializable):
 
         return tf_actions
 
-    def _graph_get_action(self, tf_obs_ph, get_action_params, scope_select, reuse_select, scope_eval, reuse_eval,
-                          tf_episode_timesteps_ph, N=None):
+    def _graph_get_action(self, tf_obs_im_ph, tf_obs_vec_ph, get_action_params, scope_select, reuse_select,
+                          scope_eval, reuse_eval, tf_episode_timesteps_ph, for_target):
         """
-        :param tf_obs_ph: [batch_size, obs_history_len, obs_dim]
+        :param tf_obs_im_ph: [batch_size, obs_history_len, obs_im_dim]
+        :param tf_obs_vec_ph: [batch_size, obs_history_len, obs_vec_dim]
         :param get_action_params: how to select actions
         :param scope_select: which scope to evaluate values (double Q-learning)
         :param scope_eval: which scope to select values (double Q-learning)
+        :param for_target: for use in the target network?
         :return: tf_get_action [batch_size, action_dim], tf_get_action_value [batch_size]
         """
         H = get_action_params['H']
-        N = self._N if N is None else N
+        N = self._N
         assert(H <= N)
         get_action_type = get_action_params['type']
-        num_obs = tf.shape(tf_obs_ph)[0]
+        num_obs = tf.shape(tf_obs_im_ph)[0]
         action_dim = self._env_spec.action_space.flat_dim
 
         ### create actions
@@ -346,10 +356,12 @@ class MACPolicy(Policy, Serializable):
         ### process to lowd
         with tf.variable_scope(scope_select, reuse=reuse_select):
             tf_preprocess_select = self._graph_preprocess_placeholders()
-            tf_obs_lowd_select = self._graph_obs_to_lowd(tf_obs_ph, tf_preprocess_select, is_training=False)
+            tf_obs_lowd_select = self._graph_obs_to_lowd(tf_obs_im_ph, tf_obs_vec_ph,
+                                                         tf_preprocess_select, is_training=False)
         with tf.variable_scope(scope_eval, reuse=reuse_eval):
             tf_preprocess_eval = self._graph_preprocess_placeholders()
-            tf_obs_lowd_eval = self._graph_obs_to_lowd(tf_obs_ph, tf_preprocess_eval, is_training=False)
+            tf_obs_lowd_eval = self._graph_obs_to_lowd(tf_obs_im_ph, tf_obs_vec_ph,
+                                                       tf_preprocess_eval, is_training=False)
         ### tile
         tf_actions = tf.tile(tf_actions, (num_obs, 1, 1))
         tf_obs_lowd_repeat_select = tf_utils.repeat_2d(tf_obs_lowd_select, K, 0)
@@ -358,11 +370,11 @@ class MACPolicy(Policy, Serializable):
         with tf.variable_scope(scope_select, reuse=reuse_select):
             tf_values_all_select, tf_values_softmax_all_select, _, _ = \
                 self._graph_inference(tf_obs_lowd_repeat_select, tf_actions, get_action_params['values_softmax'],
-                                      tf_preprocess_select, is_training=False, N=N)  # [num_obs*k, H]
+                                      tf_preprocess_select, is_training=False, N=N)  # [num_obs*K, H]
         with tf.variable_scope(scope_eval, reuse=reuse_eval):
-            tf_values_all_eval, tf_values_softmax_all_eval, _, _ = \
+            tf_values_all_eval, tf_values_softmax_all_eval, tf_yhats_all_eval, tf_bhats_all_eval = \
                 self._graph_inference(tf_obs_lowd_repeat_eval, tf_actions, get_action_params['values_softmax'],
-                                      tf_preprocess_eval, is_training=False, N=N)  # [num_obs*k, H]
+                                      tf_preprocess_eval, is_training=False, N=N)  # [num_obs*K, H]
         ### get_action based on select (policy)
         tf_values_select = tf.reduce_sum(tf_values_all_select * tf_values_softmax_all_select, reduction_indices=1)  # [num_obs*K]
         tf_values_select = tf.reshape(tf_values_select, (num_obs, K))  # [num_obs, K]
@@ -375,6 +387,14 @@ class MACPolicy(Policy, Serializable):
         tf_values_eval = tf.reduce_sum(tf_values_all_eval * tf_values_softmax_all_eval, reduction_indices=1)  # [num_obs*K]
         tf_values_eval = tf.reshape(tf_values_eval, (num_obs, K))  # [num_obs, K]
         tf_get_action_value = tf.reduce_sum(tf_values_argmax_select * tf_values_eval, reduction_indices=1)
+        tf_get_action_yhats = tf.reduce_sum(
+            tf.tile(tf.expand_dims(tf_values_argmax_select, 2), (1, 1, H)) * \
+            tf.reshape(tf_yhats_all_eval, (num_obs, K, H)),
+            1) # [num_obs, H]
+        tf_get_action_bhats = tf.reduce_sum(
+            tf.tile(tf.expand_dims(tf_values_argmax_select, 2), (1, 1, H)) * \
+            tf.reshape(tf_bhats_all_eval, (num_obs, K, H)),
+            1)  # [num_obs, H]
 
         ### check shapes
         tf.assert_equal(tf.shape(tf_get_action)[0], num_obs)
@@ -383,7 +403,7 @@ class MACPolicy(Policy, Serializable):
 
         tf_get_action_reset_ops = []
 
-        return tf_get_action, tf_get_action_value, tf_get_action_reset_ops
+        return tf_get_action, tf_get_action_value, tf_get_action_yhats, tf_get_action_bhats, tf_get_action_reset_ops
 
     def _graph_get_action_explore(self, tf_actions, tf_es_ph_dict):
         """
@@ -409,8 +429,9 @@ class MACPolicy(Policy, Serializable):
 
         return tf_actions_explore
 
-    def _graph_cost(self, tf_train_values, tf_train_values_softmax, tf_rewards_ph, tf_dones_ph,
-                    tf_target_get_action_values, N=None):
+    def _graph_cost(self, tf_train_values, tf_train_values_softmax, tf_train_yhats, tf_train_bhats,
+                    tf_rewards_ph, tf_dones_ph,
+                    tf_target_get_action_values, tf_target_get_action_yhats, tf_target_get_action_bhats, N=None):
         """
         :param tf_train_values: [None, self._N]
         :param tf_train_values_softmax: [None, self._N]
@@ -471,17 +492,103 @@ class MACPolicy(Policy, Serializable):
     def _graph_optimize(self, tf_cost, tf_policy_vars):
         tf_lr_ph = tf.placeholder(tf.float32, (), name="learning_rate")
         update_ops = tf.get_collection(tf.GraphKeys.UPDATE_OPS)
+        num_parameters = 0
         with tf.control_dependencies(update_ops):
             optimizer = tf.train.AdamOptimizer(learning_rate=tf_lr_ph, epsilon=1e-4)
             gradients = optimizer.compute_gradients(tf_cost, var_list=tf_policy_vars)
             for i, (grad, var) in enumerate(gradients):
+                num_parameters += int(np.prod(var.get_shape().as_list()))
                 if grad is not None:
                     gradients[i] = (tf.clip_by_norm(grad, self._grad_clip_norm), var)
             tf_opt = optimizer.apply_gradients(gradients, global_step=self.global_step)
+        logger.debug('Number of parameters: {0:e}'.format(float(num_parameters)))
         return tf_opt, tf_lr_ph
 
     def _graph_init_vars(self, tf_sess):
-        tf_sess.run([xplatform.global_variables_initializer()])
+        tf_sess.run([tf.global_variables_initializer()])
+
+    def _graph_setup_policy(self, policy_scope, tf_obs_im_ph, tf_obs_vec_ph, tf_actions_ph):
+        ### policy
+        with tf.variable_scope(policy_scope):
+            ### create preprocess placeholders
+            tf_preprocess = self._graph_preprocess_placeholders()
+            ### process obs to lowd
+            tf_obs_lowd = self._graph_obs_to_lowd(tf_obs_im_ph, tf_obs_vec_ph, tf_preprocess, is_training=True)
+            ### create training policy
+            tf_train_values, tf_train_values_softmax, tf_yhats, tf_bhats = \
+                self._graph_inference(tf_obs_lowd, tf_actions_ph[:, :self._H, :],
+                                      self._values_softmax, tf_preprocess, is_training=True)
+
+        with tf.variable_scope(policy_scope, reuse=True):
+            tf_train_values_test, tf_train_values_softmax_test, _, _ = \
+                self._graph_inference(tf_obs_lowd, tf_actions_ph[:, :self._get_action_test['H'], :],
+                                      self._values_softmax, tf_preprocess, is_training=False)
+            tf_get_value = tf.reduce_sum(tf_train_values_softmax_test * tf_train_values_test, reduction_indices=1)
+
+        return tf_preprocess, tf_train_values, tf_train_values_softmax, tf_yhats, tf_bhats, tf_get_value
+
+    def _graph_setup_action_selection(self, policy_scope, tf_obs_im_ph, tf_obs_vec_ph,
+                                      tf_episode_timesteps_ph, tf_test_es_ph_dict):
+        ### action selection
+        tf_get_action, tf_get_action_value, tf_get_action_yhats, tf_get_action_bhats, tf_get_action_reset_ops = \
+            self._graph_get_action(tf_obs_im_ph, tf_obs_vec_ph, self._get_action_test,
+                                   policy_scope, True, policy_scope, True,
+                                   tf_episode_timesteps_ph, for_target=False)
+        ### exploration strategy and logprob
+        tf_get_action_explore = self._graph_get_action_explore(tf_get_action, tf_test_es_ph_dict)
+
+        return tf_get_action, tf_get_action_value, tf_get_action_reset_ops, tf_get_action_explore
+
+    def _graph_setup_target(self, policy_scope, tf_obs_im_target_ph, tf_obs_vec_target_ph,
+                            tf_train_values, tf_policy_vars):
+        ### create target network
+        if self._use_target:
+            target_scope = 'target' if self._separate_target_params else 'policy'
+            ### action selection
+            tf_obs_im_target_ph_packed = tf.concat([tf_obs_im_target_ph[:, h - self._obs_history_len:h, :]
+                                                    for h in range(self._obs_history_len,
+                                                                   self._obs_history_len + self._N + 1)],
+                                                   0)
+            tf_obs_vec_target_ph_packed = tf.concat([tf_obs_vec_target_ph[:, h - self._obs_history_len:h, :]
+                                                     for h in range(self._obs_history_len,
+                                                                    self._obs_history_len + self._N + 1)],
+                                                    0)
+            tf_target_get_action, tf_target_get_action_values, tf_target_get_action_yhats, tf_target_get_action_bhats, _ = \
+                self._graph_get_action(tf_obs_im_target_ph_packed,
+                                       tf_obs_vec_target_ph_packed,
+                                       self._get_action_target,
+                                       scope_select=policy_scope,
+                                       reuse_select=True,
+                                       scope_eval=target_scope,
+                                       reuse_eval=(target_scope == policy_scope),
+                                       tf_episode_timesteps_ph=None, # TODO would need to fill in
+                                       for_target=True)
+
+            tf_target_get_action_values = tf.transpose(tf.reshape(tf_target_get_action_values, (self._N + 1, -1)))[:,1:]
+            tf_target_get_action_yhats = tf.transpose(tf.reshape(tf_target_get_action_yhats, (self._N + 1, -1)))[:,1:]
+            tf_target_get_action_bhats = tf.transpose(tf.reshape(tf_target_get_action_bhats, (self._N + 1, -1)))[:, 1:]
+        else:
+            tf_target_get_action_values = tf.zeros([tf.shape(tf_train_values)[0], self._N])
+            tf_target_get_action_yhats = None
+            tf_target_get_action_bhats = None
+
+        ### update target network
+        if self._use_target and self._separate_target_params:
+            tf_policy_vars_nobatchnorm = list(filter(lambda v: 'biased' not in v.name and 'local_step' not in v.name,
+                                                     tf_policy_vars))
+            tf_target_vars = sorted(tf.get_collection(tf.GraphKeys.GLOBAL_VARIABLES,
+                                                      scope=target_scope), key=lambda v: v.name)
+            assert (len(tf_policy_vars_nobatchnorm) == len(tf_target_vars))
+            tf_update_target_fn = []
+            for var, var_target in zip(tf_policy_vars_nobatchnorm, tf_target_vars):
+                assert (var.name.replace(policy_scope, '') == var_target.name.replace(target_scope, ''))
+                tf_update_target_fn.append(var_target.assign(var))
+            tf_update_target_fn = tf.group(*tf_update_target_fn)
+        else:
+            tf_target_vars = None
+            tf_update_target_fn = None
+
+        return tf_target_get_action_values, tf_target_get_action_yhats, tf_target_get_action_bhats, tf_target_vars, tf_update_target_fn
 
     def _graph_setup(self):
         ### create session and graph
@@ -495,81 +602,43 @@ class MACPolicy(Policy, Serializable):
                 ext.set_seed(ext.get_seed())
 
             ### create input output placeholders
-            tf_obs_ph, tf_actions_ph, tf_dones_ph, tf_rewards_ph, tf_obs_target_ph, \
-                tf_test_es_ph_dict, tf_episode_timesteps_ph = self._graph_input_output_placeholders()
+            tf_obs_im_ph, tf_obs_vec_ph, tf_actions_ph, tf_dones_ph, tf_rewards_ph,\
+            tf_obs_im_target_ph, tf_obs_vec_target_ph, tf_test_es_ph_dict, tf_episode_timesteps_ph = \
+                self._graph_input_output_placeholders()
             self.global_step = tf.Variable(0, trainable=False, name='global_step')
 
-            ### policy
+            ### setup policy
             policy_scope = 'policy'
-            with tf.variable_scope(policy_scope):
-                ### create preprocess placeholders
-                tf_preprocess = self._graph_preprocess_placeholders()
-                ### process obs to lowd
-                tf_obs_lowd = self._graph_obs_to_lowd(tf_obs_ph, tf_preprocess, is_training=True)
-                ### create training policy
-                tf_train_values, tf_train_values_softmax, _, _ = \
-                    self._graph_inference(tf_obs_lowd, tf_actions_ph[:, :self._H, :],
-                                          self._values_softmax, tf_preprocess, is_training=True)
+            tf_preprocess, tf_train_values, tf_train_values_softmax, tf_train_yhats, tf_train_bhats, tf_get_value = \
+                self._graph_setup_policy(policy_scope, tf_obs_im_ph, tf_obs_vec_ph, tf_actions_ph)
 
-            with tf.variable_scope(policy_scope, reuse=True):
-                tf_train_values_test, tf_train_values_softmax_test, _, _ = \
-                    self._graph_inference(tf_obs_lowd, tf_actions_ph[:, :self._get_action_test['H'], :],
-                                          self._values_softmax, tf_preprocess, is_training=False)
-                tf_get_value = tf.reduce_sum(tf_train_values_softmax_test * tf_train_values_test, reduction_indices=1)
-
-            ### action selection
-            tf_get_action, tf_get_action_value, tf_get_action_reset_ops = \
-                self._graph_get_action(tf_obs_ph, self._get_action_test,
-                                       policy_scope, True, policy_scope, True,
-                                       tf_episode_timesteps_ph)
-            ### exploration strategy and logprob
-            tf_get_action_explore = self._graph_get_action_explore(tf_get_action, tf_test_es_ph_dict)
+            ### get action
+            tf_get_action, tf_get_action_value, tf_get_action_reset_ops, tf_get_action_explore = \
+                self._graph_setup_action_selection(policy_scope, tf_obs_im_ph, tf_obs_vec_ph, tf_episode_timesteps_ph, tf_test_es_ph_dict)
 
             ### get policy variables
-            tf_policy_vars = sorted(tf.get_collection(xplatform.global_variables_collection_name(),
+            tf_policy_vars = sorted(tf.get_collection(tf.GraphKeys.GLOBAL_VARIABLES,
                                                       scope=policy_scope), key=lambda v: v.name)
-            tf_trainable_policy_vars = sorted(tf.get_collection(xplatform.trainable_variables_collection_name(),
+            tf_trainable_policy_vars = sorted(tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES,
                                                                 scope=policy_scope), key=lambda v: v.name)
 
-            ### create target network
-            if self._use_target:
-                target_scope = 'target' if self._separate_target_params else 'policy'
-                ### action selection
-                tf_obs_target_ph_packed = xplatform.concat([tf_obs_target_ph[:, h - self._obs_history_len:h, :]
-                                                     for h in range(self._obs_history_len, self._obs_history_len + self._N + 1)],
-                                                    0)
-                tf_target_get_action, tf_target_get_action_values, _ = self._graph_get_action(tf_obs_target_ph_packed,
-                                                                                              self._get_action_target,
-                                                                                              scope_select=policy_scope,
-                                                                                              reuse_select=True,
-                                                                                              scope_eval=target_scope,
-                                                                                              reuse_eval=(target_scope == policy_scope),
-                                                                                              tf_episode_timesteps_ph=None) # TODO would need to fill in
+            if not self._inference_only:
+                ### setup target
+                tf_target_get_action_values, tf_target_get_action_yhats, tf_target_get_action_bhats, tf_target_vars, tf_update_target_fn = \
+                    self._graph_setup_target(policy_scope, tf_obs_im_target_ph, tf_obs_vec_target_ph,
+                                             tf_train_values, tf_policy_vars)
 
-                tf_target_get_action_values = tf.transpose(tf.reshape(tf_target_get_action_values, (self._N + 1, -1)))[:, 1:]
+                ### optimization
+                tf_cost, tf_mse = self._graph_cost(tf_train_values, tf_train_values_softmax, tf_train_yhats, tf_train_bhats,
+                                                   tf_rewards_ph, tf_dones_ph,
+                                                   tf_target_get_action_values, tf_target_get_action_yhats, tf_target_get_action_bhats)
+                tf_opt, tf_lr_ph = self._graph_optimize(tf_cost, tf_trainable_policy_vars)
             else:
-                tf_target_get_action_values = tf.zeros([tf.shape(tf_train_values)[0], self._N])
+                tf_target_vars = tf_update_target_fn = tf_cost = tf_mse = tf_opt = tf_lr_ph = None
 
-            ### update target network
-            if self._use_target and self._separate_target_params:
-                tf_policy_vars_nobatchnorm= list(filter(lambda v: 'biased' not in v.name and 'local_step' not in v.name,
-                                                        tf_policy_vars))
-                tf_target_vars = sorted(tf.get_collection(xplatform.global_variables_collection_name(),
-                                                          scope=target_scope), key=lambda v: v.name)
-                assert(len(tf_policy_vars_nobatchnorm) == len(tf_target_vars))
-                tf_update_target_fn = []
-                for var, var_target in zip(tf_policy_vars_nobatchnorm, tf_target_vars):
-                    assert(var.name.replace(policy_scope, '') == var_target.name.replace(target_scope, ''))
-                    tf_update_target_fn.append(var_target.assign(var))
-                tf_update_target_fn = tf.group(*tf_update_target_fn)
-            else:
-                tf_target_vars = None
-                tf_update_target_fn = None
-
-            ### optimization
-            tf_cost, tf_mse = self._graph_cost(tf_train_values, tf_train_values_softmax, tf_rewards_ph, tf_dones_ph,
-                                               tf_target_get_action_values)
-            tf_opt, tf_lr_ph = self._graph_optimize(tf_cost, tf_trainable_policy_vars)
+            ### savers
+            tf_saver_inference = tf.train.Saver(tf_policy_vars, max_to_keep=None)
+            tf_saver_train = tf.train.Saver(max_to_keep=None) if not self._inference_only else None
 
             ### initialize
             self._graph_init_vars(tf_sess)
@@ -578,11 +647,13 @@ class MACPolicy(Policy, Serializable):
         return {
             'sess': tf_sess,
             'graph': tf_graph,
-            'obs_ph': tf_obs_ph,
+            'obs_im_ph': tf_obs_im_ph,
+            'obs_vec_ph': tf_obs_vec_ph,
             'actions_ph': tf_actions_ph,
             'dones_ph': tf_dones_ph,
             'rewards_ph': tf_rewards_ph,
-            'obs_target_ph': tf_obs_target_ph,
+            'obs_im_target_ph': tf_obs_im_target_ph,
+            'obs_vec_target_ph': tf_obs_vec_target_ph,
             'test_es_ph_dict': tf_test_es_ph_dict,
             'episode_timesteps_ph': tf_episode_timesteps_ph,
             'preprocess': tf_preprocess,
@@ -597,7 +668,9 @@ class MACPolicy(Policy, Serializable):
             'opt': tf_opt,
             'lr_ph': tf_lr_ph,
             'policy_vars': tf_policy_vars,
-            'target_vars': tf_target_vars
+            'target_vars': tf_target_vars,
+            'saver_inference': tf_saver_inference,
+            'saver_train': tf_saver_train
         }
 
     ################
@@ -605,16 +678,19 @@ class MACPolicy(Policy, Serializable):
     ################
 
     def update_preprocess(self, preprocess_stats):
-        obs_mean, obs_orth, actions_mean, actions_orth, rewards_mean, rewards_orth = \
-            preprocess_stats['observations_mean'], \
-            preprocess_stats['observations_orth'], \
+        obs_im_mean, obs_im_orth, obs_vec_mean, obs_vec_orth, actions_mean, actions_orth, rewards_mean, rewards_orth = \
+            preprocess_stats['observations_im_mean'], \
+            preprocess_stats['observations_im_orth'], \
+            preprocess_stats['observations_vec_mean'], \
+            preprocess_stats['observations_vec_orth'], \
             preprocess_stats['actions_mean'], \
             preprocess_stats['actions_orth'], \
             preprocess_stats['rewards_mean'], \
             preprocess_stats['rewards_orth']
 
         tf_assigns = []
-        for key in ('observations_mean', 'observations_orth',
+        for key in ('observations_im_mean', 'observations_im_orth',
+                    'observations_vec_mean', 'observations_vec_orth',
                     'actions_mean', 'actions_orth',
                     'rewards_mean', 'rewards_orth'):
             if self._preprocess_params[key]:
@@ -623,8 +699,10 @@ class MACPolicy(Policy, Serializable):
         # we assume if obs is im, the obs orth is the diagonal of the covariance
         self._tf_dict['sess'].run(tf_assigns,
                           feed_dict={
-                              self._tf_dict['preprocess']['observations_mean_ph']: obs_mean,
-                              self._tf_dict['preprocess']['observations_orth_ph']: obs_orth,
+                              self._tf_dict['preprocess']['observations_im_mean_ph']: obs_im_mean,
+                              self._tf_dict['preprocess']['observations_im_orth_ph']: obs_im_orth,
+                              self._tf_dict['preprocess']['observations_vec_mean_ph']: obs_vec_mean,
+                              self._tf_dict['preprocess']['observations_vec_orth_ph']: obs_vec_orth,
                               self._tf_dict['preprocess']['actions_mean_ph']: actions_mean,
                               self._tf_dict['preprocess']['actions_orth_ph']: actions_orth,
                               # self._tf_dict['preprocess']['rewards_mean_ph']: (self._N / float(self.N_output)) *  # reweighting!
@@ -647,17 +725,20 @@ class MACPolicy(Policy, Serializable):
         :param rewards: [batch_size, N+1]
         :param dones: [batch_size, N+1]
         """
+        observations_im, observations_vec = observations
         feed_dict = {
             ### parameters
             self._tf_dict['lr_ph']: self._lr_schedule.value(step),
             ### policy
-            self._tf_dict['obs_ph']: observations[:, :self._obs_history_len, :],
+            self._tf_dict['obs_im_ph']: observations_im[:, :self._obs_history_len, :],
+            self._tf_dict['obs_vec_ph']: observations_vec[:, :self._obs_history_len, :],
             self._tf_dict['actions_ph']: actions,
             self._tf_dict['dones_ph']: np.logical_or(not use_target, dones[:, :self._N]),
             self._tf_dict['rewards_ph']: rewards[:, :self._N],
         }
         if self._use_target:
-            feed_dict[self._tf_dict['obs_target_ph']] = observations
+            feed_dict[self._tf_dict['obs_im_target_ph']] = observations_im
+            feed_dict[self._tf_dict['obs_vec_target_ph']] = observations_vec
 
         cost, mse, _ = self._tf_dict['sess'].run([self._tf_dict['cost'],
                                                   self._tf_dict['mse'],
@@ -679,14 +760,16 @@ class MACPolicy(Policy, Serializable):
     ######################
 
     def get_action(self, step, current_episode_step, observation, explore):
-        chosen_actions, chosen_values, action_info = self.get_actions([step], [current_episode_step] [observation],
+        chosen_actions, chosen_values, action_infos = self.get_actions([step], [current_episode_step] [observation],
                                                                       explore=explore)
-        return chosen_actions[0], chosen_values[0], action_info
+        return chosen_actions[0], chosen_values[0], action_infos[0]
 
     def get_actions(self, steps, current_episode_steps, observations, explore):
-        d = {}
+        ds = [{} for _ in steps]
+        observations_im, observations_vec = observations
         feed_dict = {
-            self._tf_dict['obs_ph']: observations,
+            self._tf_dict['obs_im_ph']: observations_im,
+            self._tf_dict['obs_vec_ph']: observations_vec,
             self._tf_dict['episode_timesteps_ph']: current_episode_steps
         }
         if explore:
@@ -709,25 +792,40 @@ class MACPolicy(Policy, Serializable):
         if isinstance(self._env_spec.action_space, Discrete):
             actions = [int(a.argmax()) for a in actions]
 
-        return actions, values, logprobs, d
+        return actions, values, logprobs, ds
 
     def reset_get_action(self):
         self._tf_dict['sess'].run(self._tf_dict['get_action_reset_ops'])
 
-    @property
-    def recurrent(self):
-        return False
-
     def terminate(self):
         self._tf_dict['sess'].close()
+
+    #####################
+    ### Model methods ###
+    #####################
+
+    def get_model_outputs(self, observations, actions):
+        observations_im, observations_vec = observations
+        feed_dict = {
+            self._tf_dict['obs_im_ph']: observations_im,
+            self._tf_dict['obs_vec_ph']: observations_vec,
+            self._tf_dict['actions_ph']: actions
+        }
+        outputs = self._tf_dict['sess'].run(self._tf_dict['get_value'], feed_dict=feed_dict)
+
+        return outputs
 
     ######################
     ### Saving/loading ###
     ######################
 
-    def get_params_internal(self, **tags):
-        with self._tf_dict['graph'].as_default():
-            return sorted(tf.get_collection(xplatform.global_variables_collection_name()), key=lambda v: v.name)
+    def save(self, ckpt_name, train=True):
+        saver = self._tf_dict['saver_train'] if train else self._tf_dict['saver_inference']
+        saver.save(self._tf_dict['sess'], ckpt_name, write_meta_graph=False)
+
+    def restore(self, ckpt_name, train=True):
+        saver = self._tf_dict['saver_train'] if train else self._tf_dict['saver_inference']
+        saver.restore(self._tf_dict['sess'], ckpt_name)
 
     ###############
     ### Logging ###
@@ -736,8 +834,8 @@ class MACPolicy(Policy, Serializable):
     def log(self):
         for k in sorted(self._log_stats.keys()):
             if k == 'Depth':
-                logger.record_tabular(k+'Mean', np.mean(self._log_stats[k]))
-                logger.record_tabular(k+'Std', np.std(self._log_stats[k]))
+                rllab_logger.record_tabular(k+'Mean', np.mean(self._log_stats[k]))
+                rllab_logger.record_tabular(k+'Std', np.std(self._log_stats[k]))
             else:
-                logger.record_tabular(k, np.mean(self._log_stats[k]))
+                rllab_logger.record_tabular(k, np.mean(self._log_stats[k]))
         self._log_stats.clear()

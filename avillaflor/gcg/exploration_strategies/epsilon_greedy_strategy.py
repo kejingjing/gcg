@@ -1,14 +1,12 @@
 import numpy as np
 
-from avillaflor.core.serializable import Serializable
 from avillaflor.gcg.utils import schedules
 
-class EpsilonGreedyStrategy(Serializable):
+class EpsilonGreedyStrategy(object):
     """
     Takes random action with probability epsilon
     """
     def __init__(self, env_spec, endpoints, outside_value):
-        Serializable.quick_init(self, locals())
         self._env_spec = env_spec
         self.schedule = schedules.PiecewiseSchedule(endpoints=endpoints, outside_value=outside_value)
 

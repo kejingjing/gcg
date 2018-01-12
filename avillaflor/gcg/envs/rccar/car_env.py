@@ -471,7 +471,7 @@ class CarEnv(DirectObject):
        
     def _collision_only_reward(self):
         if self._collision:
-            reward = -1.0
+            reward = self._collision_reward
         else:
             reward = 0
         return reward

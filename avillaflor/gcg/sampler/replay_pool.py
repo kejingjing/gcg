@@ -7,7 +7,7 @@ import rllab.misc.logger as logger
 
 from avillaflor.gcg.utils.utils import timeit
 
-class RNNCriticReplayPool():
+class ReplayPool(object):
 
     def __init__(self, env_spec, env_horizon, N, gamma, size, obs_history_len, sampling_method,
                  save_rollouts=False, save_rollouts_observations=True, save_env_infos=False, replay_pool_params={}):
@@ -33,17 +33,12 @@ class RNNCriticReplayPool():
         self._replay_pool_params = replay_pool_params # TODO: hack
 
         ### buffer
-#        obs_shape = self._env_spec.observation_space.shape
-#        obs_dim = self._env_spec.observation_space.flat_dim
         obs_im_shape = self._env_spec.observation_im_space.shape
-#        obs_im_dim = self._env_spec.observation_im_space.flat_dim
         obs_vec_shape = self._env_spec.observation_vec_space.shape
-#        obs_vec_dim = self._env_spec.observation_vec_space.flat_dim
         obs_im_dim = obs_im_shape[0] * obs_im_shape[1] * obs_im_shape[2]
         obs_vec_dim = obs_vec_shape[0]
         action_dim = self._env_spec.action_space.flat_dim
         self._steps = np.empty((self._size,), dtype=np.int32)
-#        self._observations = np.empty((self._size, obs_dim), dtype=np.uint8 if self.obs_is_im else np.float64)
         self._observations_im = np.empty((self._size, obs_im_dim), dtype=np.uint8)
         self._observations_vec = np.ones((self._size, obs_vec_dim), dtype=np.float32)
         self._actions = np.nan * np.ones((self._size, action_dim), dtype=np.float32)
@@ -59,11 +54,8 @@ class RNNCriticReplayPool():
 
         ### keep track of statistics
         self._stats = defaultdict(int)
-#        if self.obs_is_im:
-#            self._obs_mean = (0.5 * 255) * np.ones((1, obs_dim))
-#            self._obs_orth = np.ones(obs_dim) / 255.
         self._obs_im_mean = (0.5 * 255) * np.ones((1, obs_im_dim))
-        self._obs_im_orth = np.ones(obs_im_dim)
+        self._obs_im_orth = (0.5 * 255) * np.ones(obs_im_dim)
 
         ### logging
         self._last_done_index = 0
@@ -100,10 +92,6 @@ class RNNCriticReplayPool():
         #     import IPython; IPython.embed()
         return indices
 
-#    @property
-#    def obs_is_im(self):
-#        return len(self._env_spec.observation_space.shape) > 1
-
     ##################
     ### Statistics ###
     ##################
@@ -126,7 +114,6 @@ class RNNCriticReplayPool():
                 stats[name + '_orth'] = orth / np.sqrt(eigs + 1e-5)
             else:
                 assert(value.dtype == np.uint8)
-                # TODO
                 stats[name + '_mean'] = self._obs_im_mean
                 stats[name + '_orth'] = self._obs_im_orth
 
@@ -156,13 +143,11 @@ class RNNCriticReplayPool():
     ###################
 
     def store_observation(self, step, observation):
-#        assert (observation.dtype == self._observations.dtype)
         obs_im_shape = self._env_spec.observation_im_space.shape
         obs_vec_shape = self._env_spec.observation_vec_space.shape
         obs_im_dim = obs_im_shape[0] * obs_im_shape[1] * obs_im_shape[2]
         obs_vec_dim = obs_vec_shape[0]
         self._steps[self._index] = step
-#        self._observations[self._index, :] = self._env_spec.observation_space.flatten(observation)
         self._observations_im[self._index, :] = observation[0].reshape((obs_im_dim,)) #self._env_spec.observation_im_space.flatten(observation)
         self._observations_vec[self._index, :] = observation[1].reshape((obs_vec_dim,)) #self._env_spec.observation_vec__space.flatten(observation)
 
@@ -184,6 +169,26 @@ class RNNCriticReplayPool():
 
     def encode_recent_observation(self):
         return self._encode_observation(self._index)
+
+    def _done_update(self, update_log_stats=True):
+        if self._last_done_index == self._index:
+            return
+
+        indices = self._get_indices(self._last_done_index, self._index)
+        rewards = self._rewards[indices]
+
+        trace = 0
+        values = []
+        for r in rewards[::-1]:
+            trace = r + self._gamma * trace
+            values.insert(0, trace)
+        self._values[indices] = values
+
+        ### update log stats
+        if update_log_stats:
+            self._update_log_stats()
+
+        self._last_done_index = self._index
 
     def store_effect(self, action, reward, done, env_info, est_value, logprob, flatten_action=True, update_log_stats=True):
         self._actions[self._index, :] = self._env_spec.action_space.flatten(action) if flatten_action else action
@@ -219,45 +224,54 @@ class RNNCriticReplayPool():
 
         ### compute values
         if done:
-            indices = self._get_indices(self._last_done_index, self._index)
-            rewards = self._rewards[indices]
+            self._done_update(update_log_stats=update_log_stats)
 
-            trace = 0
-            values = []
-            for r in rewards[::-1]:
-                trace = r + self._gamma * trace
-                values.insert(0, trace)
-            self._values[indices] = values
+    def force_done(self):
+        if len(self) == 0:
+            return
 
-        ### update log stats
-        if update_log_stats and done:
-            self._update_log_stats()
+        self._dones[(self._index - 1) % self._size] = True
+        self._done_update()
 
     def store_rollout(self, start_step, rollout):
-        """ Directly store rollout (e.g. if loading in offpolicy data) """
-        r_len = len(rollout['dones'])
-        # update size first b/c indices depend on it
-        if self._index + r_len > self._size:
-            self._curr_size = self._size
-        else:
-            self._curr_size = max(self._curr_size, self._index + r_len)
-        indices = self._get_indices(self._index, (self._index + r_len) % self._size)
-        self._steps[indices] = list(range(start_step, start_step + r_len))
-#        self._observations[indices, :] = rollout['observations']
-        self._observations_im[indices, :] = rollout['observations_im']
-        self._observations_vec[indices, :] = rollout['observations_vec']
-        self._actions[indices, :] = rollout['actions']
-        self._rewards[indices] = rollout['rewards']
-        self._dones[indices] = rollout['dones']
-        self._logprobs[indices] = rollout['logprobs']
-        # np.copyto(self._steps[indices], list(range(start_step, start_step + r_len)))
-        # np.copyto(self._observations[indices, :], rollout['observations'])
-        # np.copyto(self._actions[indices, :], rollout['actions'])
-        # np.copyto(self._rewards[indices], rollout['rewards'])
-        # np.copyto(self._dones[indices], rollout['dones'])
-        self._index = (self._index + r_len) % self._size
+        if not rollout['dones'][-1]:
+            # import IPython; IPython.embed()
+            print('NOT ENDING IN DONE')
+            return
+        # assert(rollout['dones'][-1])
 
-        self._last_done_index = self._index
+        r_len = len(rollout['dones'])
+        for i in range(r_len):
+            self.store_observation(start_step + i, rollout['observations'][i])
+            self.store_effect(rollout['actions'][i],
+                              rollout['rewards'][i],
+                              rollout['dones'][i],
+                              None,
+                              rollout['est_values'][i],
+                              rollout['logprobs'][i],
+                              update_log_stats=False)
+
+    ########################
+    ### Remove from pool ###
+    ########################
+
+    def trash_current_rollout(self):
+        self._actions[self._last_done_index:self._index, :] = np.nan
+        self._rewards[self._last_done_index:self._index] = np.nan
+        self._dones[self._last_done_index:self._index] = True
+        self._env_infos[self._last_done_index:self._index] = np.object
+        self._est_values[self._last_done_index:self._index] = np.nan
+        self._values[self._last_done_index:self._index] = np.nan
+        self._logprobs[self._last_done_index:self._index] = np.nan
+        self._sampling_indices[self._last_done_index:self._index] = False
+
+        r_len = (self._index - self._last_done_index) % self._size
+        if self._curr_size < self._size - 1: # TODO: not sure this is right
+            self._curr_size -= r_len
+        self._index = self._last_done_index
+        self._num_store_calls -= r_len
+
+        return r_len
 
     ########################
     ### Sample from pool ###
@@ -306,7 +320,6 @@ class RNNCriticReplayPool():
         if not self.can_sample():
             return None
 
-#        steps, observations, actions, rewards, values, dones, logprobs = [], [], [], [], [], [], []
         steps, observations_im, observations_vec, actions, rewards, values, dones, logprobs = [], [], [], [], [], [], [], []
         
         start_indices = self._sample_start_indices(batch_size, only_completed_episodes)
@@ -317,7 +330,6 @@ class RNNCriticReplayPool():
             obs_im_i, obs_vec_i = self._encode_observation(start_index)
             observations_im_i = np.vstack([obs_im_i, self._observations_im[indices[1:]]])
             observations_vec_i = np.vstack([obs_vec_i, self._observations_vec[indices[1:]]])
-#            observations_i = np.vstack([self._encode_observation(start_index), self._observations[indices[1:]]])
             actions_i = self._actions[indices]
             rewards_i = self._rewards[indices]
             values_i = self._values[indices]
@@ -345,7 +357,6 @@ class RNNCriticReplayPool():
                 # dones = [False True True True]
 
             steps.append(np.expand_dims(steps_i, 0))
-#            observations.append(np.expand_dims(observations_i, 0))
             observations_im.append(np.expand_dims(observations_im_i, 0))
             observations_vec.append(np.expand_dims(observations_vec_i, 0))
             actions.append(np.expand_dims(actions_i, 0))
@@ -355,7 +366,6 @@ class RNNCriticReplayPool():
             logprobs.append(np.expand_dims(logprobs_i, 0))
 
         steps = np.vstack(steps)
-#        observations = np.vstack(observations)
         observations_im = np.vstack(observations_im)
         observations_vec = np.vstack(observations_vec)
         actions = np.vstack(actions)
@@ -364,18 +374,7 @@ class RNNCriticReplayPool():
         dones = np.vstack(dones)
         logprobs = np.vstack(logprobs)
 
-        # timeit.start('replay_pool:isfinite')
-        # for k, arr in enumerate((observations, actions, rewards, dones)):
-        #     if not np.all(np.isfinite(arr)):
-        #         raise Exception
-        #
-        #     assert(np.all(np.isfinite(arr)))
-        #     assert(arr.shape[0] == batch_size)
-        #     assert(arr.shape[1] == self._N + 1)
-        # timeit.stop('replay_pool:isfinite')
-
-#        return steps, observations, actions, rewards, values, dones, logprobs
-        return steps, observations_im, observations_vec, actions, rewards, values, dones, logprobs
+        return steps, (observations_im, observations_vec), actions, rewards, values, dones, logprobs
     
     @staticmethod
     def sample_pools(replay_pools, batch_size, only_completed_episodes=False):
@@ -383,7 +382,6 @@ class RNNCriticReplayPool():
         if not np.any([replay_pool.can_sample() for replay_pool in replay_pools]):
             return None
 
-#        steps, observations, actions, rewards, values, dones, logprobs = [], [], [], [], [], [], []
         steps, observations_im, observations_vec, actions, rewards, values, dones, logprobs = [], [], [], [], [], [], [], []
         
         # calculate ratio of pool sizes
@@ -397,11 +395,9 @@ class RNNCriticReplayPool():
             if batch_sizes[i] == 0:
                 continue
 
-#            steps_i, observations_i, actions_i, rewards_i, values_i, dones_i, logprobs_i = \
-            steps_i, observations_im_i, observations_vec_i, actions_i, rewards_i, values_i, dones_i, logprobs_i = \
+            steps_i, (observations_im_i, observations_vec_i), actions_i, rewards_i, values_i, dones_i, logprobs_i = \
                 replay_pool.sample(batch_sizes[i], only_completed_episodes=only_completed_episodes)
             steps.append(steps_i)
-#            observations.append(observations_i)
             observations_im.append(observations_im_i)
             observations_vec.append(observations_vec_i)
             actions.append(actions_i)
@@ -411,7 +407,6 @@ class RNNCriticReplayPool():
             logprobs.append(logprobs_i)
 
         steps = np.vstack(steps)
-#        observations = np.vstack(observations)
         observations_im = np.vstack(observations_im)
         observations_vec = np.vstack(observations_vec)
         actions = np.vstack(actions)
@@ -423,8 +418,7 @@ class RNNCriticReplayPool():
         for arr in (steps, observations_im, observations_vec, actions, rewards, values, dones, logprobs):
             assert(len(arr) == batch_size)
 
-#        return steps, observations, actions, rewards, values, dones, logprobs
-        return steps, observations_im, observations_vec, actions, rewards, values, dones, logprobs
+        return steps, (observations_im, observations_vec), actions, rewards, values, dones, logprobs
     
     ###############
     ### Logging ###
@@ -449,16 +443,11 @@ class RNNCriticReplayPool():
         self._log_stats['AvgReward'].append(np.mean(rewards))
         self._log_stats['CumReward'].append(np.sum(rewards))
         self._log_stats['EpisodeLength'].append(len(rewards))
-        # TODO
-#        self._log_stats['EstValuesAvgDiff'].append(np.mean(est_values - values))
-#        self._log_stats['EstValuesMaxDiff'].append(np.max(est_values - values))
-#        self._log_stats['EstValuesMinDiff'].append(np.min(est_values - values))
 
         ## update paths
         if self._save_rollouts:
             self._log_paths.append({
                 'steps': self._steps[indices],
-#                'observations': self._observations[indices] if self._save_rollouts_observations else None,
                 'observations_im': self._observations_im[indices] if self._save_rollouts_observations else None,
                 'observations_vec': self._observations_vec[indices] if self._save_rollouts_observations else None,
                 'actions': self._actions[indices],
@@ -469,8 +458,6 @@ class RNNCriticReplayPool():
                 'values': self._values[indices],
                 'logprobs': self._logprobs[indices]
             })
-
-        self._last_done_index = self._index
 
     def get_log_stats(self):
         self._log_stats['Time'] = [time.time() - self._last_get_log_stats_time] if self._last_get_log_stats_time else [0.]
@@ -500,14 +487,8 @@ class RNNCriticReplayPool():
         logger.record_tabular(prefix+'FinalRewardStd', np.std(log_stats['FinalReward']))
         logger.record_tabular(prefix+'EpisodeLengthMean', np.mean(log_stats['EpisodeLength']))
         logger.record_tabular(prefix+'EpisodeLengthStd', np.std(log_stats['EpisodeLength']))
-        # TODO
+
         logger.record_tabular(prefix+'AvgCollision', np.mean(log_stats['AvgCollision']))
-#        logger.record_tabular(prefix+'EstValuesAvgDiffMean', np.mean(log_stats['EstValuesAvgDiff']))
-#        logger.record_tabular(prefix+'EstValuesAvgDiffStd', np.std(log_stats['EstValuesAvgDiff']))
-#        logger.record_tabular(prefix+'EstValuesMaxDiffMean', np.mean(log_stats['EstValuesMaxDiff']))
-#        logger.record_tabular(prefix+'EstValuesMaxDiffStd', np.std(log_stats['EstValuesMaxDiff']))
-#        logger.record_tabular(prefix+'EstValuesMinDiffMean', np.mean(log_stats['EstValuesMinDiff']))
-#        logger.record_tabular(prefix+'EstValuesMinDiffStd', np.std(log_stats['EstValuesMinDiff']))
         logger.record_tabular(prefix+'NumEpisodes', len(log_stats['EpisodeLength']))
         logger.record_tabular(prefix+'Time', np.mean(log_stats['Time']))
 

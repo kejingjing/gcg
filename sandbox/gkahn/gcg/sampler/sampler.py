@@ -94,6 +94,7 @@ class Sampler(object):
                 logprobs = [-np.sum(np.log(high - low))] * self._n_envs
             else:
                 raise NotImplementedError
+            action_infos = [{} for _ in range(self._n_envs)]
         else:
             actions, est_values, logprobs, action_infos = self._policy.get_actions(
                 steps=list(range(step, step + self._n_envs)),

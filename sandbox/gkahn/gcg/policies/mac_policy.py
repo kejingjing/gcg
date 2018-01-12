@@ -216,7 +216,7 @@ class MACPolicy(object):
 
             ### obs --> lower dimensional space
             if self._image_graph is not None:
-                layer = tf_obs_whitened
+                layer = tf.reshape(tf_obs_whitened, [-1, self._obs_history_len] + list(obs_shape))
                 # [batch_size, hist_len, height, width, channels]
 
                 layer = tf.reshape(layer, [-1] + list(obs_shape))
@@ -228,7 +228,7 @@ class MACPolicy(object):
                 # pass through cnn to get [batch_size * hist_len, ??]
 
                 layer = tf.reshape(layer, (-1, self._obs_history_len * layer.get_shape()[1].value))
-                # [batch_size, hist_len, ??]
+                # [batch_size, hist_len * ??]
             else:
                 layer = layers.flatten(tf_obs_whitened)
 
