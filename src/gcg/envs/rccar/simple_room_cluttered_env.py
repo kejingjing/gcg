@@ -1,6 +1,6 @@
 import os
 
-from .room_cluttered_env import RoomClutteredEnv
+from gcg.envs.rccar.room_cluttered_env import RoomClutteredEnv
 
 class SimpleRoomClutteredEnv(RoomClutteredEnv):
     def __init__(self, params={}):

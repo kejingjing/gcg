@@ -20,9 +20,9 @@ from panda3d.core import Vec3
 from panda3d.core import Vec4
 from panda3d.core import loadPrcFileData
 
-from ..env_spec import EnvSpec
-from .panda3d_camera_sensor import Panda3dCameraSensor
-from ..spaces.box import Box
+from gcg.envs.env_spec import EnvSpec
+from gcg.envs.rccar.panda3d_camera_sensor import Panda3dCameraSensor
+from gcg.envs.spaces.box import Box
 
 
 class CarEnv(DirectObject):

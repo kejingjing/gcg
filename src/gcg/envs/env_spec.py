@@ -1,4 +1,4 @@
-from .spaces.base import Space
+from gcg.envs.spaces.base import Space
 
 class EnvSpec(object):
 

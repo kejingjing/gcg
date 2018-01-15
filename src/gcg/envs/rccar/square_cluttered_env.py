@@ -1,6 +1,6 @@
 import os
 
-from .square_env import SquareEnv
+from gcg.envs.rccar.square_env import SquareEnv
 
 class SquareClutteredEnv(SquareEnv):
     def __init__(self, params={}):

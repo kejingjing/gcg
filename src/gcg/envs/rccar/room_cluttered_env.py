@@ -3,7 +3,7 @@ from math import pi
 
 import numpy as np
 
-from .square_env import SquareEnv
+from gcg.envs.rccar.square_env import SquareEnv
 
 
 class RoomClutteredEnv(SquareEnv):

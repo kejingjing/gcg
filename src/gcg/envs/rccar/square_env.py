@@ -1,6 +1,6 @@
 import os
 
-from .cylinder_env import CylinderEnv
+from gcg.envs.rccar.cylinder_env import CylinderEnv
 
 class SquareEnv(CylinderEnv):
 

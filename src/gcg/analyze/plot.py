@@ -1,11 +1,12 @@
-import joblib
+#import joblib
 import yaml
 import os
 import argparse
 import numpy as np
-
 import matplotlib
 import matplotlib.pyplot as plt
+
+from gcg.data import mypickle
 
 class Plot:
 
@@ -65,12 +66,12 @@ class Plot:
 
     def _get_itr_rollouts(self, itr, testing=False):
         if testing:
-            fname = "itr_{0}_rollouts_eval.pkl".format(itr)
+            fname = "itr_{0:04d}_eval_rollouts.pkl".format(itr)
         else:
-            fname = "itr_{0}_rollouts.pkl".format(itr)
+            fname = "itr_{0:04d}_train_rollouts.pkl".format(itr)
         path = os.path.join(self._data_dir, fname)
         if os.path.exists(path):
-            rollouts_dict = joblib.load(path)
+            rollouts_dict = mypickle.load(path)
             rollouts = rollouts_dict['rollouts']
             return rollouts
         else:

@@ -2,7 +2,7 @@ import os
 
 import numpy as np
 
-from .car_env import CarEnv
+from gcg.envs.rccar.car_env import CarEnv
 
 
 class CylinderEnv(CarEnv):
@@ -19,7 +19,7 @@ class CylinderEnv(CarEnv):
         CarEnv.__init__(
             self,
             params=params)
-        assert(self._fixed_speed)
+#        assert(self._fixed_speed)
 
     ### special for rllab
 

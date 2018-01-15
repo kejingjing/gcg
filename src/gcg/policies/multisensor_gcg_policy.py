@@ -394,7 +394,9 @@ class MultisensorGCGPolicy(GCGPolicy):
             if fn == 'square':
                 tf_fn = tf.square
             elif fn == 'cos':
-                tf_fn = lambda x: (tf.cos(x) + 1.) / 2.
+                # TODO remove HACK
+                tf_fn = lambda x: tf.cos(x) * tf.abs(tf_actions[:, :, 1:2]) 
+#                tf_fn = lambda x: (tf.cos(x) + 1.) / 2.
             elif fn == 'shift':
                 tf_fn = lambda x: (x + 1.) / 2.
             elif fn is None:
