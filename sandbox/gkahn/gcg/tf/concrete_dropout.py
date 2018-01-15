@@ -7,11 +7,17 @@ class ConcreteDropout(object):
     https://github.com/yaringal/ConcreteDropout
     """
 
-    def __init__(self, name, num_data, input_dim, concrete_temperature=0.1, model_precision=1e8, prior_weight_lengthscale=1e-1):
+    def __init__(self, name, num_data, input_dim, concrete_temperature=0.1, model_precision=1e8,
+                 prior_weight_lengthscale=1e-1):
         """
 
+        :param name: the TF name the (logit-ized) 'keep probability' Variable will have
+        :param num_data: total number of all training data
+        :param input_dim: the input dimensionality of the layer this dropout object is being applied to
         :param concrete_temperature: defines how soft/hard the dropout mask is, with lower=harder and higher=softer
         (positive scalar float)
+        :param model_precision: inverse likelihood noise variance
+        :param prior_weight_lengthscale: standard deviation of the prior weights
         """
         self.name = name
         self.num_data = num_data
@@ -23,6 +29,7 @@ class ConcreteDropout(object):
         init_keep_prob_logit = tf.get_variable(name, initializer=tf.constant(0.))
         self.keep_prob = tf.sigmoid(init_keep_prob_logit)  # map TF variable back to [0,1]
         # self.eps = 1e-7
+
         self._set_dropout_regulariser()
 
     def __call__(self, *args, **kwargs):

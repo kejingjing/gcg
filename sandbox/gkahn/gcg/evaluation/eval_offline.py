@@ -4,13 +4,13 @@ import os
 import yaml
 
 import numpy as np
-import tensorflow as tf
 import rllab.misc.logger as rllab_logger
 
 from sandbox.gkahn.gcg.utils import logger
 from sandbox.gkahn.gcg.envs.env_utils import create_env
 from sandbox.gkahn.gcg.utils import mypickle
 from sandbox.gkahn.gcg.sampler.replay_pool import ReplayPool
+from sandbox.gkahn.gcg.evaluation.bnn_plotter import BnnPlotter
 
 ### models
 from sandbox.gkahn.gcg.policies.rccar_mac_policy import RCcarMACPolicy
@@ -156,34 +156,6 @@ class EvalOffline(object):
     ################
 
     @staticmethod
-    def plot_dropout(outputs, rewards, num_sample=10):
-        """
-        outputs: num_dropout x sample_size x action_len-1
-        rewards: sample_size x action_len
-        :return:
-        """
-        import matplotlib.pyplot as plt
-        num_sample = min(num_sample, outputs.shape[1])
-        num_time = outputs.shape[2]
-        i = 0
-        for i_sample in range(num_sample):
-            for i_time in range(num_time):
-                x = outputs[:, i_sample, i_time]
-                i += 1
-                plt.subplot(num_sample,num_time,i)
-                color = 'b' if rewards[i_sample, i_time] == 0 else 'r'
-                plt.hist(x, 20, range=(-1.,0.), color=color)
-                if i_sample == 0:
-                    plt.title("t = {}".format(i_time))
-                if i_time == 0:
-                    plt.ylabel("sample {}".format(i_sample+1))
-
-                # plot ground truth
-                # if rewards[i_sample, i_time] != 0:
-                #     plt.axvline(rewards[i_sample, i_time], color='r', linewidth=2)
-        plt.show()
-
-    @staticmethod
     def clean_rewards(rewards):
         """
 
@@ -202,25 +174,29 @@ class EvalOffline(object):
         logger.info('Evaluating model')
 
         ### sample from the data, get the outputs
-        sample_size = 10
+        sample_size = 100
         steps, observations, actions, rewards, values, dones, logprobs = self._replay_pool.sample(sample_size)
         # import IPython; IPython.embed()
         observations = observations[:, :self._model.obs_history_len, :]
 
-        num_dropout = 1000
+        num_bnn_samples = 50
         outputs = []
-        for _ in range(num_dropout):
+        for _ in range(num_bnn_samples):
             outputs.append(self._model.get_model_outputs(observations, actions))
         outputs = np.asarray(outputs)  # num_dropout x sample_size x action_len
 
-        rewards = EvalOffline.clean_rewards(rewards)
-        EvalOffline.plot_dropout(outputs, rewards)
-
-        import IPython; IPython.embed()
-
         # TODO(rowan)
         print("TODO: Rowan do some kind of analysis here.")
-        # outputs vs rewards
+        rewards = EvalOffline.clean_rewards(rewards)
+        import IPython; IPython.embed()
+
+        BnnPlotter.plot_dropout(outputs, rewards)
+        BnnPlotter.plot_predtruth(outputs, rewards)
+        BnnPlotter.plot_hist(outputs, rewards)
+        BnnPlotter.plot_hist_no_time_structure(outputs, rewards)
+        BnnPlotter.plot_roc(outputs, rewards)
+        BnnPlotter.plot_scatter_prob_and_sigma(outputs, rewards)
+
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
