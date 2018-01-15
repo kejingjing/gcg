@@ -38,13 +38,13 @@ class LoggerClass(object):
     ### Setup ###
     #############
         
-    def setup(self, log_path, lvl):
-        display_name = os.path.dirname(log_path).split('/')[-1]
+    def setup(self, display_name, log_path, lvl):
         self._logger = self._get_logger(LoggerClass.GLOBAL_LOGGER_NAME,
                                         log_path,
                                         lvl=lvl,
                                         display_name=display_name)
         self._csv_path = os.path.splitext(log_path)[0] + '.csv'
+        self._tabular_keys = None
 
     def _get_logger(self, name, log_path, lvl=logging.INFO, display_name=None):
         if isinstance(lvl, str):
@@ -114,18 +114,24 @@ class LoggerClass(object):
         if len(self._tabular) == 0:
             return ''
 
-        log_str = tabulate(self._tabular)
-
         ### print
         if print_func is not None:
+            log_str = tabulate(self._tabular)
             for line in log_str.split('\n'):
                 print_func(line)
 
         ### csv
+        tabular_dict = dict(self._tabular)
+        keys_sorted = tuple(sorted(tabular_dict.keys()))
         mode = 'a' if os.path.exists(self._csv_path) else 'w'
         with open(self._csv_path, mode) as f:
             writer = csv.writer(f)
-            writer.writerow(dict(self._tabular))
+            if mode == 'w':
+                self._tabular_keys = keys_sorted
+                writer.writerow(self._tabular_keys)
+            else:
+                assert(keys_sorted == self._tabular_keys)
+            writer.writerow([tabular_dict[k] for k in self._tabular_keys])
 
         self._tabular = list()
 

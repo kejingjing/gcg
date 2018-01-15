@@ -2,7 +2,7 @@
 How to use:
 (1) Create a template file
 (2) For all parameters you wish to iterate over, replace with a unique "V_<name>"
-(3)
+(3) Fill in the below TODO
 """
 
 import os
