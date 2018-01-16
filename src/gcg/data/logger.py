@@ -29,16 +29,22 @@ class LoggerClass(object):
     )
     
     def __init__(self):
+        self._dir = None
         self._logger = None
         self._log_path = None
         self._csv_path = None
         self._tabular = list()
-        
+
+    @property
+    def dir(self):
+        return self._dir
+
     #############
     ### Setup ###
     #############
         
     def setup(self, display_name, log_path, lvl):
+        self._dir = os.path.dirname(log_path)
         self._logger = self._get_logger(LoggerClass.GLOBAL_LOGGER_NAME,
                                         log_path,
                                         lvl=lvl,

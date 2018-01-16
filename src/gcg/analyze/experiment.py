@@ -1,4 +1,4 @@
-import os, copy
+import os, copy, glob
 import yaml
 import itertools
 
@@ -26,12 +26,15 @@ class MultiExperimentComparison(object):
         """
         return experiment with params['exp_name'] == item
         """
-        exps = list(itertools.chain(*[eg.experiments for eg in self._experiment_groups]))
-        for exp in exps:
+        for exp in self.list:
             if exp.name == item:
                 return exp
 
         raise Exception('Experiment {0} not found'.format(item))
+
+    @property
+    def list(self):
+        return list(itertools.chain(*[eg.experiments for eg in self._experiment_groups]))
 
     ################
     ### Plotting ###
@@ -194,10 +197,22 @@ class Experiment(object):
 
         self.policy = PolicyClass(
             env_spec=self.env.spec,
-            exploration_strategies=None,
+            exploration_strategies={},
             **policy_params,
             **self.params['policy']
         )
+
+    def restore_policy(self, itr=None):
+        assert (self.policy is not None)
+
+        if itr is None:
+            itr = 0
+            while len(glob.glob(self._train_policy_file_name(itr) + '*')) > 0:
+                itr += 1
+
+        if itr > 0:
+            print('Loading train policy from iteration {0}...'.format(itr - 1))
+            self.policy.restore(self._train_policy_file_name(itr - 1), train=True)
 
     def close_policy(self):
         self.policy.terminate()
@@ -220,6 +235,9 @@ class Experiment(object):
 
     def _eval_rollouts_file_name(self, itr):
         return os.path.join(self._folder, 'itr_{0:04d}_eval_rollouts.pkl'.format(itr))
+
+    def _train_policy_file_name(self, itr):
+        return os.path.join(self._folder, 'itr_{0:04d}_train_policy.ckpt'.format(itr))
 
     ####################
     ### Data loading ###

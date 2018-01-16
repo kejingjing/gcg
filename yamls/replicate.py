@@ -36,7 +36,10 @@ num_seeds = 1
 ######################
 
 def exp_name(num, seed):
-    return '{0}{1:03d}/seed_{2}'.format(BASE_EXP_NAME, num, seed)
+    s = '{0}{1:03d}'.format(BASE_EXP_NAME, num)
+    if seed is not None:
+        s += '/seed_{0}'.format(seed)
+    return s
 
 def exp_yaml_name(num, seed=None):
     s = '{0}{1:03d}'.format(BASE_EXP_NAME, num)
@@ -52,8 +55,8 @@ with open(exp_yaml_name(BASE_EXP_NUM), 'r') as f:
 for i, product in enumerate(itertools.product(*product_options)):
     curr_exp_num = BASE_EXP_NUM + 1 + i
     for curr_exp_seed in range(num_seeds):
-        curr_exp_name = exp_name(curr_exp_num, curr_exp_seed)
-        curr_exp_yaml_name = exp_yaml_name(curr_exp_num, curr_exp_seed)
+        curr_exp_name = exp_name(curr_exp_num, curr_exp_seed if num_seeds > 1 else None)
+        curr_exp_yaml_name = exp_yaml_name(curr_exp_num, curr_exp_seed if num_seeds > 1 else None)
 
         ### combine options into one dictionary
         curr_options = {}

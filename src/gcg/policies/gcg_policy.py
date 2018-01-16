@@ -591,6 +591,8 @@ class GCGPolicy(object):
         return tf_target_get_action_values, tf_target_get_action_yhats, tf_target_get_action_bhats, tf_target_vars, tf_update_target_fn
 
     def _graph_setup(self):
+        import IPython; IPython.embed()
+
         ### create session and graph
         tf_sess = tf.get_default_session()
         if tf_sess is None:
