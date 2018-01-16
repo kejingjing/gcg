@@ -102,12 +102,12 @@ class RWrccarEnv:
         self._dt = params['dt']
         self.horizon = params['horizon']
 
-        action_space = Box(low=np.array([params['steer_limits'][0], params['speed_limits'][0]]),
+        self.action_space = Box(low=np.array([params['steer_limits'][0], params['speed_limits'][0]]),
                                 high=np.array([params['steer_limits'][1], params['speed_limits'][1]]))
-        observation_im_space = Box(low=0, high=255, shape=params['obs_shape'])
-        observation_vec_space = Box(np.array([]), np.array([]))
-        assert (observation_im_space.shape[-1] == 1 or observation_im_space.shape[-1] == 3)
-        self.spec = EnvSpec(observation_im_space, observation_vec_space, action_space)
+        self.observation_im_space = Box(low=0, high=255, shape=params['obs_shape'])
+        self.observation_vec_space = Box(np.array([]), np.array([]))
+        assert (self.observation_im_space.shape[-1] == 1 or self.observation_im_space.shape[-1] == 3)
+        self.spec = EnvSpec(self.observation_im_space, self.observation_vec_space, self.action_space)
 
         self._last_step_time = None
         self._is_collision = False
@@ -171,19 +171,21 @@ class RWrccarEnv:
         recon_pil_jpg = BytesIO(msg.data)
         recon_pil_arr = Image.open(recon_pil_jpg)
 
-        is_grayscale = (self.spec.observation_im_space.shape[-1] == 1)
+        is_grayscale = (self.observation_im_space.shape[-1] == 1)
         if is_grayscale:
             grayscale = recon_pil_arr.convert('L')
-            grayscale_resized = grayscale.resize(self.spec.observation_im_space.shape[:-1][::-1],
+            grayscale_resized = grayscale.resize(self.observation_im_space.shape[:-1][::-1],
                                                  Image.ANTIALIAS)  # b/c (width, height)
             im = np.expand_dims(np.array(grayscale_resized), 2)
         else:
             # rgb = np.array(recon_pil_arr)
-            rgb_resized = recon_pil_arr.resize(self.spec.observation_im_space.shape[:-1][::-1],
+            rgb_resized = recon_pil_arr.resize(self.observation_im_space.shape[:-1][::-1],
                                                Image.ANTIALIAS)  # b/c (width, height)
             im = np.array(rgb_resized)
 
-        return im
+        vec = np.array([])
+
+        return im, vec
 
     def _get_speed(self):
         return self._ros_msgs['encoder/both'].data
@@ -218,7 +220,7 @@ class RWrccarEnv:
         if not offline:
             assert (self.ros_is_good())
 
-        lb, ub = self.spec.action_space.bounds
+        lb, ub = self.action_space.bounds
         action = np.clip(action, lb, ub)
 
         cmd_steer, cmd_vel = action

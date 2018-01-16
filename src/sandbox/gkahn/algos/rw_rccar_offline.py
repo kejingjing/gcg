@@ -16,6 +16,7 @@ import rosbag
 class RWrccarOffline(GCG):
 
     def __init__(self, **kwargs):
+        self._save_dir = kwargs['save_dir']
         self._env = kwargs['env']
         self._policy = kwargs['policy']
 
@@ -121,7 +122,7 @@ class RWrccarOffline(GCG):
                         action = [d_bag['cmd/steer'][t-1].data, d_bag['cmd/vel'][t-1].data]
                         next_obs, reward, done, _ = self._env.step(action, offline=True)
 
-                        rollout['observations'].append(curr_obs.ravel())
+                        rollout['observations'].append(curr_obs)
                         rollout['actions'].append(action)
                         rollout['rewards'].append(reward)
                         rollout['dones'].append(done or (t == bag_length - 1))
@@ -229,6 +230,7 @@ def run_rw_rccar_offline(params):
     else:
         max_path_length = env.horizon
     algo = RWrccarOffline(
+        save_dir=save_dir,
         env=env,
         policy=policy,
         max_path_length=max_path_length,

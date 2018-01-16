@@ -228,7 +228,7 @@ class GCGPolicy(object):
 
             ### FCNN
 
-            if tf_obs_vec_ph.get_shape()[1].value > 0:
+            if tf_obs_vec_ph.get_shape()[-1].value > 0:
                 obs_vec_dim = self._env_spec.observation_vec_space.flat_dim
                 layer = tf.concat([layer, tf.reshape(tf_obs_vec_ph, [-1, self._obs_history_len * obs_vec_dim])], axis=1)
 
@@ -591,8 +591,6 @@ class GCGPolicy(object):
         return tf_target_get_action_values, tf_target_get_action_yhats, tf_target_get_action_bhats, tf_target_vars, tf_update_target_fn
 
     def _graph_setup(self):
-        import IPython; IPython.embed()
-
         ### create session and graph
         tf_sess = tf.get_default_session()
         if tf_sess is None:

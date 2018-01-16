@@ -102,14 +102,18 @@ class ReplayPool(object):
                                    ('actions', self._actions[:len(self)], False),
                                    ('rewards', self._rewards[:len(self)], False)):
             if not is_im:
-                stats[name + '_mean'] = np.mean(value, axis=0)
-                if np.shape(self._stats[name + '_mean']) is tuple():
-                    stats[name + '_mean'] = np.array([stats[name + '_mean']])
-                stats[name + '_cov'] = np.cov(value.T)
-                if np.shape(stats[name + '_cov']) is tuple():
-                    stats[name + '_cov'] = np.array([[stats[name + '_cov']]])
-                orth, eigs, _ = np.linalg.svd(stats[name + '_cov'])
-                stats[name + '_orth'] = orth / np.sqrt(eigs + 1e-5)
+                if np.prod(np.shape(value)) == 0:
+                    stats[name + '_mean'] = np.empty((1, 0))
+                    stats[name + '_cov'] = np.empty((0, 0))
+                else:
+                    stats[name + '_mean'] = np.mean(value, axis=0)
+                    if np.shape(self._stats[name + '_mean']) is tuple():
+                        stats[name + '_mean'] = np.array([stats[name + '_mean']])
+                    stats[name + '_cov'] = np.cov(value.T)
+                    if np.shape(stats[name + '_cov']) is tuple():
+                        stats[name + '_cov'] = np.array([[stats[name + '_cov']]])
+                    orth, eigs, _ = np.linalg.svd(stats[name + '_cov'])
+                    stats[name + '_orth'] = orth / np.sqrt(eigs + 1e-5)
             else:
                 assert(value.dtype == np.uint8)
                 stats[name + '_mean'] = self._obs_im_mean
@@ -129,8 +133,11 @@ class ReplayPool(object):
                 stats[k] += ratio * v
         for name in ('observations_im', 'observations_vec', 'actions', 'rewards'):
             if name+'_cov' in stats.keys():
-                orth, eigs, _ = np.linalg.svd(stats[name+'_cov'])
-                stats[name+'_orth'] = orth / np.sqrt(eigs + 1e-5)
+                if np.prod(stats[name+'_cov'].shape) == 0:
+                    stats[name+'_orth'] = np.empty((0, 0))
+                else:
+                    orth, eigs, _ = np.linalg.svd(stats[name+'_cov'])
+                    stats[name+'_orth'] = orth / np.sqrt(eigs + 1e-5)
             else:
                 stats[name+'_orth'] = pool_stats[0][name+'_orth']
 
