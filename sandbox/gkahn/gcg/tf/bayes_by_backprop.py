@@ -7,8 +7,10 @@ class BayesByBackprop(object):
     https://arxiv.org/abs/1505.05424
     """
 
-    def __init__(self, layer_name):
+    def __init__(self, layer_name, num_data, batch_size):
         self.layer_name = layer_name
+        self.num_data = num_data
+        self.batch_size = batch_size
 
     @staticmethod
     def _make_positive(x):
@@ -16,18 +18,29 @@ class BayesByBackprop(object):
             # return tf.exp(x)
             return tf.nn.softplus(x)
 
-    @staticmethod
-    def _get_random_weight_or_bias(shape, mu_initializer, tensor_name):
+    def _get_weights_or_biases_and_regularize(self, shape, mu_initializer, regularizer, str_weights_or_biases):
+        tensor_name = "{}-{}".format(self.layer_name, str_weights_or_biases)
         mu = tf.get_variable(tensor_name + '-mu', shape=shape, initializer=mu_initializer)
         rho = tf.get_variable(tensor_name + '-rho', initializer=tf.constant(0.1, shape=shape))
         sigma = BayesByBackprop._make_positive(rho)
         noise_sample = tf.random_normal(shape)
 
         weight_or_bias = mu + sigma * noise_sample
+
+        sigma_prior = 1.0 / tf.sqrt(tf.to_float(shape[0]))
+        kl_regularization = BayesByBackprop._get_kl_regularization(mu, sigma, sigma_p=sigma_prior)
+        kl_regularization *= tf.to_float(self.batch_size) / self.num_data  # minibatch scaling
+        tf.add_to_collection(tf.GraphKeys.REGULARIZATION_LOSSES, kl_regularization)
+        tf.add_to_collection(tf.GraphKeys.REGULARIZATION_LOSSES, regularizer(weight_or_bias))
+
         return weight_or_bias
 
-        # f = log q - log pw pdw
-        # could possibly put the log(q) term in. Blundell seems to say it's not needed, but the sampled epsilon might?
+    @staticmethod
+    def _get_kl_regularization(mean_q, sigma_q, mean_p=0.0, sigma_p=1.0):
+        var_q = tf.square(sigma_q)
+        var_p = tf.square(sigma_p)
+        kl = (tf.square(mean_q - mean_p) + var_q) / (2.*var_p) + 0.5*(tf.log(var_p) - tf.log(var_q) - 1.)
+        return tf.reduce_sum(kl)
 
     def get_weight_regularizer_scale(self):
         return 0.5
@@ -38,22 +51,23 @@ class BayesByBackprop(object):
                  trainable=True):
         # TODO: sort out normalisers...I don't use them yet.
 
-        #  weights
-        weight_shape = [inputs.get_shape()[1].value, num_outputs]
+        # weights
+        weights_shape = [inputs.get_shape()[1].value, num_outputs]
         if weights_initializer is None:
-            weights_initializer = tf.truncated_normal(weight_shape, stddev=0.01)
-        weights = BayesByBackprop._get_random_weight_or_bias(weight_shape, weights_initializer, self.layer_name + '-weights')
-        tf.add_to_collection(tf.GraphKeys.REGULARIZATION_LOSSES, weights_regularizer(weights))
+            weights_initializer = tf.truncated_normal(weights_shape, stddev=0.01)
+        weights = self._get_weights_or_biases_and_regularize(weights_shape, weights_initializer, weights_regularizer,
+                                                             'weights')
 
-        #  biases
-        bias_shape = [num_outputs]
+        # biases
+        biases_shape = [num_outputs]
         if biases_initializer is None:
-            biases_initializer = tf.constant(0.0, shape=bias_shape)
+            biases_initializer = tf.constant(0.0, shape=biases_shape)
         if biases_regularizer is None:
             biases_regularizer = weights_regularizer
-        biases = BayesByBackprop._get_random_weight_or_bias(bias_shape, biases_initializer, self.layer_name + '-biases')
-        tf.add_to_collection(tf.GraphKeys.REGULARIZATION_LOSSES, biases_regularizer(biases))
+        biases = self._get_weights_or_biases_and_regularize(biases_shape, biases_initializer, biases_regularizer,
+                                                            'biases')
 
+        # the layer
         fc_layer_out = tf.matmul(inputs, weights) + biases
         if activation_fn is not None:
             fc_layer_out = activation_fn(fc_layer_out)

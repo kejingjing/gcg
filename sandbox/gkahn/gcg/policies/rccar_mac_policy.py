@@ -54,6 +54,7 @@ class RCcarMACPolicy(MACPolicy, Serializable):
         rnn_outputs = tf.reshape(rnn_outputs, (-1, rnn_output_dim))
 
         self._output_graph.update({'output_dim': 1})
+        self._output_graph.update({'batch_size': batch_size})  # TODO: rowan's hack
         tf_values, _ = networks.fcnn(rnn_outputs, self._output_graph, is_training=is_training, scope='fcnn_values',
                                      T=H, global_step_tensor=self.global_step, num_dp=num_dp)
         tf_values = tf.reshape(tf_values, (-1, H))

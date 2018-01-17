@@ -179,7 +179,7 @@ class EvalOffline(object):
         # import IPython; IPython.embed()
         observations = observations[:, :self._model.obs_history_len, :]
 
-        num_bnn_samples = 100
+        num_bnn_samples = 1000
         outputs = []
         for _ in range(num_bnn_samples):
             outputs.append(self._model.get_model_outputs(observations, actions))
