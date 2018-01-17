@@ -174,12 +174,12 @@ class EvalOffline(object):
         logger.info('Evaluating model')
 
         ### sample from the data, get the outputs
-        sample_size = 100
+        sample_size = 200
         steps, observations, actions, rewards, values, dones, logprobs = self._replay_pool.sample(sample_size)
         # import IPython; IPython.embed()
         observations = observations[:, :self._model.obs_history_len, :]
 
-        num_bnn_samples = 50
+        num_bnn_samples = 100
         outputs = []
         for _ in range(num_bnn_samples):
             outputs.append(self._model.get_model_outputs(observations, actions))

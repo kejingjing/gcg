@@ -4,7 +4,7 @@ import tensorflow as tf
 from sandbox.gkahn.gcg.tf import rnn_cell
 from sandbox.gkahn.gcg.tf.weight_norm import fully_connected_weight_norm, conv2d_weight_norm
 from sandbox.gkahn.gcg.tf.concrete_dropout import ConcreteDropout
-from sandbox.gkahn.gcg.tf.weight_uncertainty import WeightUncertainty
+from sandbox.gkahn.gcg.tf.bayes_by_backprop import BayesByBackprop
 
 def convnn(
         inputs,
@@ -212,53 +212,53 @@ def fcnn(
                 weight_regularizer_scale = 0.5
             elif bnn_method == 'concrete_dropout':
                 num_data = params['num_data']  # TODO: find a better solution than yaml file to get this value
-                input_dim = inputs.get_shape()[1].value
-                layer_name = "concrete-fcnn-{}".format(i)
+                input_dim = next_layer_input.get_shape()[1].value
+                layer_name = bnn_method + "-fcnn{}".format(i)
                 concrete_dropout = ConcreteDropout(layer_name, num_data, input_dim)
 
                 fc_layer = tf.contrib.layers.fully_connected
                 weight_regularizer_scale = concrete_dropout.get_weight_regularizer_scale()
-            elif bnn_method == 'weight_uncertainty':
-                layer_name = "weight-uncertainty-fcnn-{}".format(i)
-                weight_uncertainty = WeightUncertainty(layer_name)
+            elif bnn_method == 'bayes_by_backprop':
+                layer_name = bnn_method + "-fcnn{}".format(i)
+                bayes_by_backprop = BayesByBackprop(layer_name)
 
                 # note: object is callable like a layer, but only assumes a one-time call per instance
-                fc_layer = weight_uncertainty
-                weight_regularizer_scale = weight_uncertainty.get_weight_regularizer_scale()
+                fc_layer = bayes_by_backprop
+                weight_regularizer_scale = bayes_by_backprop.get_weight_regularizer_scale()
             elif bnn_method == 'probabilistic-backprop':
                 raise NotImplementedError
 
             assert(normalizer is None)  # TODO(Greg) below if-block should be removed?
-            if normalizer == 'weight_norm':
-                next_layer_input = fully_connected_weight_norm(
-                    inputs=next_layer_input,
-                    num_outputs=dim,
-                    activation_fn=activation,
-                    trainable=True,
-                    global_step_tensor=global_step_tensor
-                )
-            elif T is None or normalizer != 'batch_norm':
-                next_layer_input = tf.contrib.layers.fully_connected(
-                    inputs=next_layer_input,
-                    num_outputs=dim,
-                    activation_fn=activation,
-                    normalizer_fn=normalizer_fn,
-                    normalizer_params=normalizer_params,
-                    weights_initializer=tf.contrib.layers.xavier_initializer(dtype=dtype),
-                    biases_initializer=tf.constant_initializer(0., dtype=dtype),
-                    weights_regularizer=tf.contrib.layers.l2_regularizer(weight_regularizer_scale),
-                    trainable=True)
-            else:
-                fc_out = fc_layer(
-                    inputs=next_layer_input,
-                    num_outputs=dim,
-                    activation_fn=activation,
-                    weights_initializer=tf.contrib.layers.xavier_initializer(dtype=dtype),
-                    weights_regularizer=tf.contrib.layers.l2_regularizer(weight_regularizer_scale),
-                    trainable=True)
-                fc_out_reshape = tf.reshape(fc_out, (-1, T * fc_out.get_shape()[1].value))
-                bn_out = tf.contrib.layers.batch_norm(fc_out_reshape, **normalizer_params)
-                next_layer_input = tf.reshape(bn_out, tf.shape(fc_out))
+            # if normalizer == 'weight_norm':
+            #     next_layer_input = fully_connected_weight_norm(
+            #         inputs=next_layer_input,
+            #         num_outputs=dim,
+            #         activation_fn=activation,
+            #         trainable=True,
+            #         global_step_tensor=global_step_tensor
+            #     )
+            # elif T is None or normalizer != 'batch_norm':
+            next_layer_input = fc_layer(
+                inputs=next_layer_input,
+                num_outputs=dim,
+                activation_fn=activation,
+                normalizer_fn=normalizer_fn,
+                normalizer_params=normalizer_params,
+                weights_initializer=tf.contrib.layers.xavier_initializer(dtype=dtype),
+                biases_initializer=tf.constant_initializer(0., dtype=dtype),
+                weights_regularizer=tf.contrib.layers.l2_regularizer(weight_regularizer_scale),
+                trainable=True)
+            # else:
+            #     fc_out = fc_layer(
+            #         inputs=next_layer_input,
+            #         num_outputs=dim,
+            #         activation_fn=activation,
+            #         weights_initializer=tf.contrib.layers.xavier_initializer(dtype=dtype),
+            #         weights_regularizer=tf.contrib.layers.l2_regularizer(weight_regularizer_scale),
+            #         trainable=True)
+            #     fc_out_reshape = tf.reshape(fc_out, (-1, T * fc_out.get_shape()[1].value))
+            #     bn_out = tf.contrib.layers.batch_norm(fc_out_reshape, **normalizer_params)
+            #     next_layer_input = tf.reshape(bn_out, tf.shape(fc_out))
 
             if dropout is not None:
                 assert (type(dropout) is float and 0 < dropout and dropout <= 1.0)
