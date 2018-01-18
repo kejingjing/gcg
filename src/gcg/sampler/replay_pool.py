@@ -274,7 +274,6 @@ class ReplayPool(object):
         if self._curr_size < self._size - 1: # TODO: not sure this is right
             self._curr_size -= r_len
         self._index = self._last_done_index
-        self._num_store_calls -= r_len
 
         return r_len
 
@@ -436,13 +435,6 @@ class ReplayPool(object):
         rewards = self._rewards[indices]
         est_values = self._est_values[indices]
         values = self._values[indices]
-        if self._save_env_infos:
-            env_infos = self._env_infos[indices] 
-            rewards = [info['reward'] for info in env_infos]
-            self._log_stats['AvgCollision'].append(env_infos[-1]['coll'])
-        else:
-            rewards = self._rewards[indices]
-            self._log_stats['AvgCollision'].append(int(rewards[-1] < 0.))
         
         self._log_stats['FinalReward'].append(rewards[-1])
         self._log_stats['AvgReward'].append(np.mean(rewards))

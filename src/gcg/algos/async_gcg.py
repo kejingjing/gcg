@@ -197,6 +197,7 @@ class AsyncGCG(GCG):
         self._run_rsync()
 
         assert (self._eval_sampler is None) # TODO: temporary
+        train_rollouts = []
         eval_rollouts = []
 
         self._reset_sampler()
@@ -258,14 +259,22 @@ class AsyncGCG(GCG):
                 timeit.start('total')
 
             ### save rollouts / load model
-            if inference_step > 0 and inference_step % self._inference_save_every_n_steps == 0:
+            train_rollouts += self._sampler.get_recent_paths()
+            if inference_step > 0 and inference_step % self._inference_save_every_n_steps == 0 and \
+               len(train_rollouts) > 0:
+                response = input('Keep rollouts?')
+                if response != 'y':
+                    train_rollouts = []
+                    continue
+                
                 ### reset to stop rollout
                 self._sampler.reset()
 
                 ### save rollouts
                 logger.debug('Saving files for itr {0}'.format(inference_itr))
-                self._save_inference(inference_itr, self._sampler.get_recent_paths(), eval_rollouts)
+                self._save_inference(inference_itr, train_rollouts, eval_rollouts)
                 inference_itr += 1
+                train_rollouts = []
                 eval_rollouts = []
 
                 ### load model
@@ -304,11 +313,7 @@ def create_async_gcg(params, log_fname):
     env_str = params['alg'].pop('env')
     env = create_env(env_str, seed=params['seed'])
 
-    env_eval_str = params['alg'].pop('env_eval', env_str)
-    if env_eval_str is not None:
-        env_eval = create_env(env_eval_str, seed=params['seed'])
-    else:
-        env_eval = None
+    env_eval = None
 
     #####################
     ### Create policy ###
@@ -331,6 +336,7 @@ def create_async_gcg(params, log_fname):
 
     max_path_length = params['alg'].pop('max_path_length')
     algo = AsyncGCG(
+        save_dir=save_dir,
         env=env,
         env_eval=env_eval,
         policy=policy,
