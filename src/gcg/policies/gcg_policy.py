@@ -79,6 +79,10 @@ class GCGPolicy(object):
     ##################
 
     @property
+    def H(self):
+        return self._H
+
+    @property
     def N(self):
         return self._N
 

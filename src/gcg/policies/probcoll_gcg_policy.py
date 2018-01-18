@@ -259,3 +259,10 @@ class ProbcollGCGPolicy(GCGPolicy):
 
         return cost + weight_decay, cost
 
+    ################
+    ### Training ###
+    ################
+
+    def train_step(self, step, steps, observations, actions, rewards, values, dones, logprobs, use_target):
+        assert(np.logical_or(rewards == 0, rewards == -1).all())
+        super(ProbcollGCGPolicy, self).train_step(step, steps, observations, actions, rewards, values, dones, logprobs, use_target)

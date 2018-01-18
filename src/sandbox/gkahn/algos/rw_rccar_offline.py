@@ -52,12 +52,34 @@ class RWrccarOffline(GCG):
 
     def _add_offpolicy_rosbags(self, folders):
         """ Convert rosbags to pkls and save """
+
+        def visualize(rollout):
+            r_len = len(rollout['dones'])
+            import matplotlib.pyplot as plt
+
+            f, ax = plt.subplots(1, 1)
+
+            imshow = ax.imshow(rollout['observations'][0][0][:, :, 0], cmap='Greys_r')
+            ax.set_title('r: {0}'.format(rollout['rewards'][0]))
+            plt.show(block=False)
+            plt.pause(0.01)
+            input('t: 0')
+            for t in range(1, r_len):
+                imshow.set_data(rollout['observations'][t][0][:, :, 0])
+                ax.set_title('r: {0}'.format(rollout['rewards'][t]))
+                f.canvas.draw()
+                plt.pause(0.01)
+                input('t: {0}'.format(t))
+
+            plt.close(f)
+
         for folder_num, folder in enumerate(sorted(folders)):
             assert (os.path.exists(folder))
             logger.info('Loading offpolicy rosbag data from {0}'.format(folder))
 
             pkl_fname = os.path.join(self._save_dir, 'rosbag_rollouts_{0:02d}.pkl'.format(folder_num))
-
+            timesteps_kept = 0
+            timesteps_total = 0
             if not os.path.exists(pkl_fname):
                 rollouts = []
                 rosbag_fnames = sorted([os.path.join(folder, f) for f in os.listdir(folder) if '.bag' in f])
@@ -75,20 +97,45 @@ class RWrccarOffline(GCG):
                        d_bag[topic].append(msg)
                     bag.close()
 
+                    timesteps_total += len(d_bag['mode'])
+
                     ### trim to whenever collision occurs
-                    colls = [msg.data for msg in d_bag['collision/all']]
+                    colls = np.array([msg.data for msg in d_bag['collision/all']])
                     if len(colls) == 0:
                         logger.warn('{0}: empty bag'.format(os.path.basename(fname)))
                         continue
-                    if max(colls) == 0:
-                        bag_length = len(colls)
-                    else:
-                        bag_length = np.argmax(colls) + 1
+
+                    def prune(start, end):
+                        for key, value in d_bag.items():
+                            d_bag[key] = value[start:end]
+
+                    ### prune based on collisions
+                    if colls.max() > 0:
+                        prune(None, colls.argmax() + 1)
+
+                    encoders = np.array([msg.data for msg in d_bag['encoder/both']])
+                    ### make sure it moved at least a little bit
+                    if (encoders > 1e-4).sum() < 2:
+                        logger.warn('{0}: car never moved'.format(os.path.basename(fname)))
+                        continue
+                    ### trim out initial negative encoders
+                    if encoders.min() < 0:
+                        start_idx = len(encoders) - (encoders[::-1] < 0).argmax()
+                        prune(start_idx, None)
+
+                    ### prune based on when collision goes zero
+                    encoders = np.array([msg.data for msg in d_bag['encoder/both']])
+                    is_encoder_collision = False
+                    for t in range(len(encoders)-1, 0, -1):
+                        if encoders[t-1] > 0 and abs(encoders[t]) < 1e-4:
+                            is_encoder_collision = True
+                            prune(None, t+1)
+                            break
+
+                    bag_length = len(d_bag['mode'])
                     if bag_length < 2:
                         logger.warn('{1}: length {0}'.format(bag_length, os.path.basename(fname)))
                         continue
-                    for key, value in d_bag.items():
-                        d_bag[key] = value[:bag_length]
 
                     ### some commands might be off by one, just append them
                     good_cmds = True
@@ -140,8 +187,23 @@ class RWrccarOffline(GCG):
                     for key, value in rollout.items():
                         rollout[key] = np.array(value)
 
+                    ### do some post-processing to deal with bag errors
+                    rollout['dones'][-1] = True
+                    if is_encoder_collision:
+                        rollout['rewards'][-1] = -1.
+
+                    if len(rollout['dones']) > 1:
+                        assert((rollout['rewards'][:-1] == 0).all())
+                    assert(rollout['rewards'][-1] == 0 or rollout['rewards'][-1] == -1)
+
+                    if len(rollout['dones']) < self._env.horizon - 1 and rollout['rewards'][-1] != -1:
+                        logger.warn('{0}: rollout is not horizon length and does not end in collision'.format(os.path.basename(fname)))
+                        continue
+
+                    timesteps_kept += len(rollout['dones'])
                     rollouts.append(rollout)
 
+                logger.info('Saving {0:e} timesteps ({1:.2f} kept)'.format(timesteps_kept, timesteps_kept / float(timesteps_total)))
                 logger.info('Saving pkl {0}'.format(pkl_fname))
                 mypickle.dump({'rollouts': rollouts}, pkl_fname)
 

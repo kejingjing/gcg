@@ -191,7 +191,13 @@ class RWrccarEnv:
         return self._ros_msgs['encoder/both'].data
 
     def _get_reward(self):
-        reward = self._collision_reward if self._is_collision else self._get_speed()
+        if self._is_collision:
+            reward = self._collision_reward
+        else:
+            if self._collision_reward_only:
+                reward = 0
+            else:
+                reward = self._get_speed()
         return reward
 
     def _get_done(self):

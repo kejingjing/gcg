@@ -1,6 +1,9 @@
 import os, csv
+from collections import defaultdict
 import logging
 from colorlog import ColoredFormatter
+
+import numpy as np
 
 from .tabulate import tabulate
 
@@ -127,7 +130,8 @@ class LoggerClass(object):
                 print_func(line)
 
         ### csv
-        tabular_dict = dict(self._tabular)
+        tabular_dict = defaultdict(lambda: np.nan)
+        tabular_dict.update(dict(self._tabular))
         keys_sorted = tuple(sorted(tabular_dict.keys()))
         mode = 'a' if os.path.exists(self._csv_path) else 'w'
         with open(self._csv_path, mode) as f:
@@ -136,6 +140,8 @@ class LoggerClass(object):
                 self._tabular_keys = keys_sorted
                 writer.writerow(self._tabular_keys)
             else:
+                for k in keys_sorted:
+                    assert (k in self._tabular_keys)
                 assert(keys_sorted == self._tabular_keys)
             writer.writerow([tabular_dict[k] for k in self._tabular_keys])
 

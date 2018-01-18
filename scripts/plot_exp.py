@@ -4,8 +4,11 @@ import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib import cm
 
+from gcg.policies.gcg_policy import GCGPolicy
+from gcg.sampler.replay_pool import ReplayPool
 from gcg.analyze.experiment import ExperimentGroup, MultiExperimentComparison
 from gcg.data.logger import logger
+from gcg.data import mypickle
 
 DATA_DIR = os.path.join(os.path.dirname(os.path.realpath(__file__)), '../data')
 
@@ -31,15 +34,15 @@ def plot_test():
                  xlim=None,
                  ylim=None)
 
-def plot_rw_rccar_var001_var016():
+def plot_rw_rccar_var001_var016(ckpt_itr=None):
     label_params =[['exp', ('exp_name',)]]
 
     experiment_groups = [
-        ExperimentGroup(os.path.join(DATA_DIR, 'local/rw-rccar/var{0:03d}'.format(i)),
+        ExperimentGroup(os.path.join(DATA_DIR, 'rw_rccar/var{0:03d}'.format(i)),
                         label_params=label_params,
                         plot={
 
-                        }) for i in [1]#[1, 3, 5, 7, 9, 11, 13, 15]
+                        }) for i in [19]
     ]
 
     mec = MultiExperimentComparison(experiment_groups)
@@ -68,16 +71,142 @@ def plot_rw_rccar_var001_var016():
     # f.savefig('plots/rw-rccar/var001_016.png', bbox_inches='tight', dpi=100)
 
     ### plot policy on the rollouts
+
+    # candidate actions
     for exp in exps:
-        exp.create_env()
-        exp.create_policy()
-        exp.restore_policy()
+        rollouts = mypickle.load(os.path.join(exp.folder, 'rosbag_rollouts_00.pkl'))['rollouts']
+        rollouts = rollouts[::len(rollouts) // 16]
+        # rollouts = list(itertools.chain(*exp.train_rollouts))[:16]
 
-        # rollouts = list(itertools.chain(*exp.train_rollouts))
-        #
-        # exp.close_policy()
+        tf_sess, tf_graph = GCGPolicy.create_session_and_graph(gpu_device=1, gpu_frac=0.6)
 
-    import IPython; IPython.embed()
+        with tf_sess.as_default(), tf_graph.as_default():
+            exp.create_env()
+            exp.create_policy()
+            exp_ckpt_itr = exp.restore_policy(itr=ckpt_itr)
+
+            K = 2048
+            actions = np.random.uniform(*exp.env.action_space.bounds,
+                                        size=(K, exp.policy.H + 1, exp.env.action_space.flat_dim))
+
+            replay_pool = ReplayPool(
+                env_spec=exp.env.spec,
+                env_horizon=exp.env.horizon,
+                N=exp.policy.N,
+                gamma=1,
+                size=int(1.1 * sum([len(r['dones']) for r in rollouts])),
+                obs_history_len=exp.policy.obs_history_len,
+                sampling_method='uniform'
+            )
+
+            step = 0
+            outputs = []
+            for i, r in enumerate(rollouts):
+                r_len = len(r['dones'])
+                outputs_i = []
+                for j in range(r_len):
+                    # evaluate and get output
+                    observation = (r['observations'][j][0], np.empty([exp.policy.obs_history_len, 0]))
+                    replay_pool.store_observation(step, observation)
+
+                    encoded_observation = replay_pool.encode_recent_observation()
+
+                    observation_im, observation_vec = encoded_observation
+                    observations = (np.tile(observation_im, (K, 1, 1)), np.tile(observation_vec, (K, 1, 1)))
+
+                    probcolls = exp.policy.get_model_outputs(observations, actions)
+                    outputs_i.append(probcolls)
+
+                    step += 1
+                    replay_pool.store_effect(
+                        r['actions'][j],
+                        r['rewards'][j],
+                        r['dones'][j],
+                        None,
+                        r['est_values'][j],
+                        r['logprobs'][j]
+                    )
+
+                outputs.append(outputs_i)
+
+        f, axes = plt.subplots(1, 2, figsize=(12, 8))
+        imshow = None
+
+        plot_folder = os.path.join(exp.folder, 'plot', 'ckpt_{0:03d}'.format(exp_ckpt_itr))
+        os.makedirs(plot_folder, exist_ok=True)
+
+        for i, (r_i, output_i) in enumerate(zip(rollouts, outputs)):
+            for j, (obs, cost) in enumerate(zip(r_i['observations'], output_i)):
+                obs_im, obs_vec = obs
+                probcoll = -cost
+
+                # plot image
+                im = np.reshape(obs_im, exp.env.observation_im_space.shape)
+                is_gray = (im.shape[-1] == 1)
+                if is_gray:
+                    im = im[:, :, 0]
+                    color = 'Greys_r'
+                else:
+                    color=None
+
+                if imshow is None:
+                    imshow = axes[0].imshow(im, cmap=color)
+                else:
+                    imshow.set_data(im)
+
+                # plot probcolls
+                steers = actions[:, :-1, 0]
+                angle_const = 0.5 * np.pi / 2.
+                angles = angle_const * steers
+                ys = np.cumsum(np.cos(angles), axis=1)
+                xs = np.cumsum(-np.sin(angles), axis=1)
+                sort_idxs = np.argsort(probcoll)
+
+                xlim = (min(xs.min(), 0), max(xs.max(), 0))
+                ylim = (min(ys.min(), -0.5), max(ys.max(), 0.5))
+                min_probcoll = probcoll.min()
+                max_probcoll = probcoll.max()
+
+                keep = 10
+                ys = ys[sort_idxs][::K//keep]
+                xs = xs[sort_idxs][::K//keep]
+                probcoll = probcoll[sort_idxs][::K//keep]
+                steers = steers[sort_idxs][::K//keep]
+
+                ys = np.hstack((np.zeros((len(ys), 1)), ys))
+                xs = np.hstack((np.zeros((len(xs), 1)), xs))
+
+                # if lines is None:
+                axes[1].cla()
+                axes[1].plot(0, 0, 'rx', markersize=10)
+                # lines = axes[1].plot(np.expand_dims(xs[:,-1], 0), np.expand_dims(ys[:,-1], 0),
+                #                      marker='o', linestyle='', markersize=2)
+                lines = axes[1].plot(xs.T, ys.T)
+                axes[1].plot(xs[0,:], ys[0,:], 'b^', linestyle='', markersize=5)
+                axes[1].arrow(0, 0, -2*np.sin(0.5*np.pi * steers[0,0]), 2*np.cos(0.5*np.pi * steers[0,0]), fc='b', ec='b')
+
+                #normalize for color reasons
+                # probcoll -= probcoll.min()
+                # probcoll /= probcoll.max()
+                for l, p in zip(lines, probcoll):
+                    l.set_color(cm.viridis(1 - p))
+                    l.set_markerfacecolor(cm.viridis(1 - p))
+
+                axes[1].set_xlim(xlim)
+                axes[1].set_ylim(ylim)
+                axes[1].set_aspect('equal')
+
+                axes[1].set_title('steer {0:.3f}, probcoll in [{1:.2f}, {2:.2f}]'.format(-steers[0, 0], min_probcoll, max_probcoll))
+
+                f.savefig(os.path.join(plot_folder, 'rollout_{0:03d}_t_{1:03d}.png'.format(i, j)),
+                          bbox_inches='tight', dpi=200)
+                # break
+            # break
+
+        plt.close(f)
+
+        tf_sess.close()
+
 
 if __name__ == '__main__':
     logger.setup(display_name='tmp',

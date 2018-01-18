@@ -169,7 +169,7 @@ class ExperimentGroup(object):
 
 class Experiment(object):
     def __init__(self, folder, plot=dict(), clear_obs=False):
-        self._folder = folder
+        self.folder = folder
         self.plot = plot
         self._clear_obs = clear_obs
 
@@ -186,20 +186,27 @@ class Experiment(object):
     ########################
 
     def create_env(self):
-        self.env = create_env(self.params['alg']['env'])
+        if self.env is None:
+            self.env = create_env(self.params['alg']['env'])
 
-    def create_policy(self):
+    def create_policy(self, gpu_device=None, gpu_frac=None):
         assert (self.env is not None)
+        params = copy.deepcopy(self.params)
 
-        policy_class = self.params['policy']['class']
+        policy_class = params['policy']['class']
         PolicyClass = eval(policy_class)
-        policy_params = self.params['policy'][policy_class]
+        policy_params = params['policy'][policy_class]
+
+        if gpu_device is not None:
+            params['policy']['gpu_device'] = gpu_device
+        if gpu_frac is not None:
+            params['policy']['gpu_frac'] = gpu_frac
 
         self.policy = PolicyClass(
             env_spec=self.env.spec,
             exploration_strategies={},
             **policy_params,
-            **self.params['policy']
+            **params['policy']
         )
 
     def restore_policy(self, itr=None):
@@ -214,6 +221,8 @@ class Experiment(object):
             print('Loading train policy from iteration {0}...'.format(itr - 1))
             self.policy.restore(self._train_policy_file_name(itr - 1), train=True)
 
+        return itr
+
     def close_policy(self):
         self.policy.terminate()
         self.policy = None
@@ -224,20 +233,20 @@ class Experiment(object):
 
     @property
     def _params_file(self):
-        return os.path.join(self._folder, 'params.yaml')
+        return os.path.join(self.folder, 'params.yaml')
 
     @property
     def _csv_file(self):
-        return os.path.join(self._folder, 'log.csv')
+        return os.path.join(self.folder, 'log.csv')
 
     def _train_rollouts_file_name(self, itr):
-        return os.path.join(self._folder, 'itr_{0:04d}_train_rollouts.pkl'.format(itr))
+        return os.path.join(self.folder, 'itr_{0:04d}_train_rollouts.pkl'.format(itr))
 
     def _eval_rollouts_file_name(self, itr):
-        return os.path.join(self._folder, 'itr_{0:04d}_eval_rollouts.pkl'.format(itr))
+        return os.path.join(self.folder, 'itr_{0:04d}_eval_rollouts.pkl'.format(itr))
 
     def _train_policy_file_name(self, itr):
-        return os.path.join(self._folder, 'itr_{0:04d}_train_policy.ckpt'.format(itr))
+        return os.path.join(self.folder, 'itr_{0:04d}_train_policy.ckpt'.format(itr))
 
     ####################
     ### Data loading ###
