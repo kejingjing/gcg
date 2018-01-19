@@ -25,15 +25,14 @@ class BayesByBackprop(object):
         sigma = BayesByBackprop._make_positive(rho)
         noise_sample = tf.random_normal(shape)
 
-        weight_or_bias = mu + sigma * noise_sample
+        weights_or_biases = mu + sigma * noise_sample
 
-        sigma_prior = 1.0 / tf.sqrt(tf.to_float(shape[0]))
-        kl_regularization = BayesByBackprop._get_kl_regularization(mu, sigma, sigma_p=sigma_prior)
+        kl_regularization = BayesByBackprop._get_kl_regularization(mu, sigma)
         kl_regularization *= tf.to_float(self.batch_size) / self.num_data  # minibatch scaling
         tf.add_to_collection(tf.GraphKeys.REGULARIZATION_LOSSES, kl_regularization)
-        tf.add_to_collection(tf.GraphKeys.REGULARIZATION_LOSSES, regularizer(weight_or_bias))
+        # tf.add_to_collection(tf.GraphKeys.REGULARIZATION_LOSSES, regularizer(weight_or_bias))
 
-        return weight_or_bias
+        return weights_or_biases
 
     @staticmethod
     def _get_kl_regularization(mean_q, sigma_q, mean_p=0.0, sigma_p=1.0):
@@ -60,10 +59,9 @@ class BayesByBackprop(object):
 
         # biases
         biases_shape = [num_outputs]
-        if biases_initializer is None:
-            biases_initializer = tf.constant(0.0, shape=biases_shape)
         if biases_regularizer is None:
             biases_regularizer = weights_regularizer
+            # biases_initializer = tf.constant(0.0, shape=biases_shape)
         biases = self._get_weights_or_biases_and_regularize(biases_shape, biases_initializer, biases_regularizer,
                                                             'biases')
 

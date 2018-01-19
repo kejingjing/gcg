@@ -1,10 +1,9 @@
-import numpy as np
 import tensorflow as tf
 
 from sandbox.gkahn.gcg.tf import rnn_cell
-from sandbox.gkahn.gcg.tf.weight_norm import fully_connected_weight_norm, conv2d_weight_norm
-from sandbox.gkahn.gcg.tf.concrete_dropout import ConcreteDropout
-from sandbox.gkahn.gcg.tf.bayes_by_backprop import BayesByBackprop
+from sandbox.gkahn.gcg.tf.weight_norm import conv2d_weight_norm
+from sandbox.gkahn.gcg.tf.bnn.concrete_dropout import ConcreteDropout
+from sandbox.gkahn.gcg.tf.bnn.bayes_by_backprop import BayesByBackprop
 
 def convnn(
         inputs,
@@ -209,10 +208,7 @@ def fcnn(
 
             num_data = params.get('num_data', None)  # TODO: find a better solution than yaml file to get this value
             batch_size = params.get('batch_size', None)  # TODO: find a better solution than yaml file to get this value
-            if bnn_method is None:
-                fc_layer = tf.contrib.layers.fully_connected
-                weight_regularizer_scale = 0.5
-            elif bnn_method == 'concrete_dropout':
+            if bnn_method == 'concrete_dropout':
                 input_dim = next_layer_input.get_shape()[1].value
                 layer_name = bnn_method + "-fcnn{}".format(i)
                 concrete_dropout = ConcreteDropout(layer_name, num_data, input_dim)
@@ -226,6 +222,9 @@ def fcnn(
                 weight_regularizer_scale = bayes_by_backprop.get_weight_regularizer_scale()
             elif bnn_method == 'probabilistic-backprop':
                 raise NotImplementedError
+            else:
+                fc_layer = tf.contrib.layers.fully_connected
+                weight_regularizer_scale = 0.5
 
             assert(normalizer is None)  # TODO(Greg) below if-block should be removed?
             # if normalizer == 'weight_norm':

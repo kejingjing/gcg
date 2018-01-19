@@ -18,9 +18,11 @@ from sandbox.gkahn.gcg.policies.rccar_mac_policy import RCcarMACPolicy
 # TODO: import new models
 
 class EvalOffline(object):
-    def __init__(self, yaml_path):
+    def __init__(self, yaml_path, bootstrapping, main_model=None):
         with open(yaml_path, 'r') as f:
             self._params = yaml.load(f)
+
+        self._bootstrapping = bootstrapping
 
         self._folder = os.path.splitext(yaml_path)[0]
         os.makedirs(self._folder, exist_ok=True)
@@ -28,7 +30,10 @@ class EvalOffline(object):
 
         logger.info('Yaml {0}'.format(yaml_path))
         logger.info('Creating environment')
-        self._env = self._create_env()
+        if main_model is None:
+            self._env = self._create_env()
+        else:
+            self._env = main_model._env
         logger.info('Creating model')
         self._model = self._create_model()
         logger.info('Loading data')
@@ -84,6 +89,12 @@ class EvalOffline(object):
                 num_load_fail += 1
         logger.info('Files successfully loaded: {0:.2f}%'.format(100. * num_load_success /
                                                                  float(num_load_success + num_load_fail)))
+
+        # TODO: rowan
+        if self._bootstrapping:
+            num_rollouts = len(rollouts)
+            ensemble_indices = np.random.choice(num_rollouts, size=num_rollouts, replace=True)
+            rollouts = [rollouts[i] for i in ensemble_indices]
 
         replay_pool = ReplayPool(
             env_spec=self._env.spec,
@@ -170,24 +181,27 @@ class EvalOffline(object):
                 reward_row[i:] = -1
         return rewards
 
-    def evaluate(self):
+    @staticmethod
+    def evaluate(main_model, all_models, bootstrapping):
         logger.info('Evaluating model')
 
         ### sample from the data, get the outputs
         sample_size = 200
-        steps, observations, actions, rewards, values, dones, logprobs = self._replay_pool.sample(sample_size)
-        # import IPython; IPython.embed()
-        observations = observations[:, :self._model.obs_history_len, :]
-
-        num_bnn_samples = 1000
-        outputs = []
-        for _ in range(num_bnn_samples):
-            outputs.append(self._model.get_model_outputs(observations, actions))
-        outputs = np.asarray(outputs)  # num_dropout x sample_size x action_len
-
-        # TODO(rowan)
-        print("TODO: Rowan do some kind of analysis here.")
+        steps, observations, actions, rewards, values, dones, logprobs = main_model._replay_pool.sample(sample_size)
         rewards = EvalOffline.clean_rewards(rewards)
+        observations = observations[:, :main_model._model.obs_history_len, :]
+
+        outputs = []
+        if bootstrapping:
+            for model in all_models:
+                outputs.append(model._model.get_model_outputs(observations, actions))
+        else:
+            model = all_models[0]
+            num_bnn_samples = 1000
+            for _ in range(num_bnn_samples):
+                outputs.append(model._model.get_model_outputs(observations, actions))
+        outputs = np.asarray(outputs)  # num_bnn_samples x sample_size x action_len
+
         import IPython; IPython.embed()
 
         BnnPlotter.plot_dropout(outputs, rewards)
@@ -207,10 +221,21 @@ if __name__ == '__main__':
     args = parser.parse_args()
 
     yaml_path = os.path.join(args.yamldir, args.yaml)
+    with open(yaml_path, 'r') as f:
+        params = yaml.load(f)
+        bootstrapping = params['policy']['RCcarMACPolicy']['output_graph']['bnn_method'] == 'bootstrap'
 
-    eval_offline = EvalOffline(yaml_path)
-    if not args.no_train:
-        eval_offline.train()
-    eval_offline.evaluate()
+    num_bootstraps = 20 if bootstrapping else 1
+
+    main_model = EvalOffline(yaml_path, bootstrapping=False)  # do not train, just a data_loader
+
+    all_models = []
+    for i in range(num_bootstraps):
+        model = EvalOffline(yaml_path, bootstrapping, main_model)
+        if not args.no_train:
+            model.train()
+        all_models.append(model)
+
+    EvalOffline.evaluate(main_model, all_models, bootstrapping)
 
 
