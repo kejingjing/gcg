@@ -11,22 +11,20 @@ import itertools
 
 # TODO What is the template file?
 BASE_EXP_NAME = 'rw_rccar/var'
-BASE_EXP_NUM = 000
+BASE_EXP_NUM = 20
 
 # TODO What are all the keys being replaced?
-option_keys = ['V_height', 'V_width', 'V_color', 'V_H', 'V_K', 'V_device', 'V_frac']
+option_keys = ['V_height', 'V_width', 'V_color', 'V_H', 'V_device', 'V_frac']
 
 # TODO What are all the combinations you want to do?
-imsize = [{'V_height': height, 'V_width': width} for (height, width) in [(36, 64), (90, 160)]]
 imsize = [
     {'V_height': 36, 'V_width': 64,  'V_device': 1, 'V_frac': 0.4},
     {'V_height': 90, 'V_width': 160, 'V_device': 0, 'V_frac': 0.4},
 ]
 color = [{'V_color': c} for c in (1, 3)]
 horizon = [{'V_H': H} for H in (12, 16)]
-action = [{'V_K': K} for K in (2048, 4096)]
 
-product_options = (imsize, color, horizon, action)
+product_options = (imsize, color, horizon)
 
 # TODO How many seeds do you want to do for each combination?
 num_seeds = 1
