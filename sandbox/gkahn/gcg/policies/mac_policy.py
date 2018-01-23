@@ -609,6 +609,13 @@ class MACPolicy(Parameterized, Serializable):
             tf_saver_inference = tf.train.Saver(tf_policy_vars, max_to_keep=None)
             tf_saver_train = tf.train.Saver(max_to_keep=None) if not self._inference_only else None
 
+            # bnn saver
+            policy_vars_except_fcnn_output = []
+            for var in tf_policy_vars:
+                if not var.name.startswith('policy/obs_to_lowd_fcnn') and not var.name.startswith('policy/fcnn_values/bnn'):
+                    policy_vars_except_fcnn_output.append(var)
+            tf_saver_inference_except_fcnn_output = tf.train.Saver(policy_vars_except_fcnn_output, max_to_keep=None)
+
             ### initialize
             self._graph_init_vars(tf_sess)
 
@@ -637,6 +644,7 @@ class MACPolicy(Parameterized, Serializable):
             'policy_vars': tf_policy_vars,
             'target_vars': tf_target_vars,
             'saver_inference': tf_saver_inference,
+            'saver_inference_except_fcnn_output': tf_saver_inference_except_fcnn_output,
             'saver_train': tf_saver_train
         }
 
@@ -786,8 +794,20 @@ class MACPolicy(Parameterized, Serializable):
         saver = self._tf_dict['saver_train'] if train else self._tf_dict['saver_inference']
         saver.save(self._tf_dict['sess'], ckpt_name, write_meta_graph=False)
 
+    def save_bnn_preprocessing(self, ckpt_name=None):
+        if ckpt_name is None:
+            ckpt_name = os.path.join(os.getcwd(), "bnn_preprocessing.ckpt")
+        saver = self._tf_dict['saver_inference_except_fcnn_output']
+        saver.save(self._tf_dict['sess'], ckpt_name, write_meta_graph=False)
+
     def restore(self, ckpt_name, train=True):
         saver = self._tf_dict['saver_train'] if train else self._tf_dict['saver_inference']
+        saver.restore(self._tf_dict['sess'], ckpt_name)
+
+    def restore_bnn_preprocessing(self, ckpt_name=None):
+        if ckpt_name is None:
+            ckpt_name = os.path.join(os.getcwd(), "bnn_preprocessing.ckpt")
+        saver = self._tf_dict['saver_inference_except_fcnn_output']
         saver.restore(self._tf_dict['sess'], ckpt_name)
 
     ###############

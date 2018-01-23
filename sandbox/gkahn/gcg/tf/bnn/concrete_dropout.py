@@ -26,7 +26,7 @@ class ConcreteDropout(object):
         self.model_precision = model_precision # tau in yarin's work
         self.prior_weight_lengthscale = prior_weight_lengthscale  # unsure if this is a good value
 
-        init_keep_prob_logit = tf.get_variable(layer_name, initializer=tf.constant(0.))
+        init_keep_prob_logit = tf.get_variable(layer_name + "_logit", initializer=tf.constant(0.))
         self.keep_prob = tf.sigmoid(init_keep_prob_logit)  # map TF variable back to [0,1]
         # self.eps = 1e-7
 

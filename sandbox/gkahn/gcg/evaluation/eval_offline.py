@@ -41,6 +41,9 @@ class EvalOffline(object):
         if self._params['offline']['checkpoint'] is not None:
             logger.info('Loading checkpoint')
             self._model.restore(self._params['offline']['checkpoint'])
+        if self._params['offline']['checkpoint_bnn_preprocessing'] is not None:  # TODO: both can't be true, fix.
+            logger.info('Loading bnn checkpoint')
+            self._model.restore_bnn_preprocessing(self._params['offline']['checkpoint_bnn_preprocessing'])
 
     ###################
     ### Environment ###
@@ -203,13 +206,25 @@ class EvalOffline(object):
         outputs = np.asarray(outputs)  # num_bnn_samples x sample_size x action_len
 
         import IPython; IPython.embed()
-
         BnnPlotter.plot_dropout(outputs, rewards)
-        BnnPlotter.plot_predtruth(outputs, rewards)
+        # BnnPlotter.plot_predtruth(outputs, rewards)
         BnnPlotter.plot_hist(outputs, rewards)
         BnnPlotter.plot_hist_no_time_structure(outputs, rewards)
         BnnPlotter.plot_roc(outputs, rewards)
         BnnPlotter.plot_scatter_prob_and_sigma(outputs, rewards)
+
+        import pickle
+        file_outputs = open("outputs.pkl", 'wb')
+        file_rewards = open("rewards.pkl", 'wb')
+        pickle.dump(outputs, file_outputs)
+        pickle.dump(rewards, file_rewards)
+
+        # file_outputs = open("outputs.pkl", 'rb')
+        # file_outputs.seek(0)
+        # file_rewards = open("rewards.pkl", 'rb')
+        # file_rewards.seek(0)
+        # outputs = pickle.load(file_outputs)
+        # rewards = pickle.load(file_rewards)
 
 
 if __name__ == '__main__':
@@ -228,7 +243,6 @@ if __name__ == '__main__':
     num_bootstraps = 20 if bootstrapping else 1
 
     main_model = EvalOffline(yaml_path, bootstrapping=False)  # do not train, just a data_loader
-
     all_models = []
     for i in range(num_bootstraps):
         model = EvalOffline(yaml_path, bootstrapping, main_model)

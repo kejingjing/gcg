@@ -208,20 +208,21 @@ def fcnn(
 
             num_data = params.get('num_data', None)  # TODO: find a better solution than yaml file to get this value
             batch_size = params.get('batch_size', None)  # TODO: find a better solution than yaml file to get this value
+            bnn_layer_name = "bnn_{}_{}".format(bnn_method, i)
             if bnn_method == 'concrete_dropout':
                 input_dim = next_layer_input.get_shape()[1].value
-                layer_name = bnn_method + "-fcnn{}".format(i)
-                concrete_dropout = ConcreteDropout(layer_name, num_data, input_dim)
+                concrete_dropout = ConcreteDropout(bnn_layer_name, num_data, input_dim)
                 fc_layer = tf.contrib.layers.fully_connected
                 weight_regularizer_scale = concrete_dropout.get_weight_regularizer_scale()
             elif bnn_method == 'bayes_by_backprop':
-                layer_name = bnn_method + "-fcnn{}".format(i)
-                bayes_by_backprop = BayesByBackprop(layer_name, num_data, batch_size)
+                bayes_by_backprop = BayesByBackprop(bnn_layer_name, num_data, batch_size)
                 # note: object is callable like a layer, but only assumes a one-time call per instance
                 fc_layer = bayes_by_backprop
                 weight_regularizer_scale = bayes_by_backprop.get_weight_regularizer_scale()
-            elif bnn_method == 'probabilistic-backprop':
-                raise NotImplementedError
+            elif bnn_method == 'probabilistic_backprop':
+                probabilistic_backprop = PBP_net.PBP_net()  # TODO: can this handle being layer-wise?
+                fc_layer = probabilistic_backprop
+                weight_regularizer_scale = 0.0
             else:
                 fc_layer = tf.contrib.layers.fully_connected
                 weight_regularizer_scale = 0.5

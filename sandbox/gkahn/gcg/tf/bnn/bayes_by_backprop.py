@@ -20,8 +20,8 @@ class BayesByBackprop(object):
 
     def _get_weights_or_biases_and_regularize(self, shape, mu_initializer, regularizer, str_weights_or_biases):
         tensor_name = "{}-{}".format(self.layer_name, str_weights_or_biases)
-        mu = tf.get_variable(tensor_name + '-mu', shape=shape, initializer=mu_initializer)
-        rho = tf.get_variable(tensor_name + '-rho', initializer=tf.constant(0.1, shape=shape))
+        mu = tf.get_variable(tensor_name + '_mu', shape=shape, initializer=mu_initializer)
+        rho = tf.get_variable(tensor_name + '_rho', initializer=tf.constant(0.1, shape=shape))
         sigma = BayesByBackprop._make_positive(rho)
         noise_sample = tf.random_normal(shape)
 

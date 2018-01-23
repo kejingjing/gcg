@@ -383,3 +383,10 @@ class RCcarMACPolicy(MACPolicy, Serializable):
         return MACPolicy.train_step(self, step, steps, observations, actions, rewards, values, dones, logprobs,
                                     use_target=self._use_target) # True: to keep dones to true
 
+    # TODO: rowan tmp debugging
+    def _graph_optimize(self, tf_cost, tf_policy_vars):
+        bnn_vars = []
+        for var in tf_policy_vars:
+            if var.name.startswith('policy/fcnn_values/bnn'):
+                bnn_vars.append(var)
+        return MACPolicy._graph_optimize(self, tf_cost, bnn_vars)
