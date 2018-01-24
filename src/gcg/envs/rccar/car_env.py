@@ -261,6 +261,7 @@ class CarEnv(DirectObject):
             bodyNP.reparentTo(render)
             bodyNP.setPos(pos[0], pos[1], pos[2])
             bodyNP.setHpr(hpr[0], hpr[1], hpr[2])
+            bodyNP.set_scale(scale, scale, scale)
             if isinstance(bodyNP.node(), BulletRigidBodyNode):
                 bodyNP.node().setMass(0.0)
                 bodyNP.node().setKinematic(True)
