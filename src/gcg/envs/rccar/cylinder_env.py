@@ -1,5 +1,4 @@
 import os
-
 import numpy as np
 
 from gcg.envs.rccar.car_env import CarEnv
@@ -19,25 +18,6 @@ class CylinderEnv(CarEnv):
         CarEnv.__init__(
             self,
             params=params)
-#        assert(self._fixed_speed)
-
-    ### special for rllab
-
-    def _get_observation(self):
-        im = super(CylinderEnv, self)._get_observation()
-        ori = self._get_heading()
-        vec = np.array([ori])
-        return im, vec
-
-    def step(self, action):
-        lb, ub = self._unnormalized_action_space.bounds
-        scaled_action = lb + (action + 1.) * 0.5 * (ub - lb)
-        scaled_action = np.clip(scaled_action, lb, ub)
-
-        if self._fixed_speed:
-            scaled_action[1] = self._speed_limits[0]
-
-        return CarEnv.step(self, scaled_action)
 
     ### default
 

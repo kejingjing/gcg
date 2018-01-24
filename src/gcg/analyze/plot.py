@@ -1,4 +1,3 @@
-#import joblib
 import yaml
 import os
 import argparse
@@ -102,7 +101,7 @@ class Plot:
         time_tot = 0
         for itr, rollout in enumerate(rollouts):
             for trajectory in rollout:
-                env_infos = trajectory['env_infos']
+                env_infos = trajectory['env_infos'][:-1]
                 reward = sum([env_info['reward'] for env_info in env_infos])
                 coll = int(env_infos[-1]['coll'])
                 rewards.append(reward)
@@ -152,7 +151,7 @@ class Plot:
             plt.xlim([-12.5, 12.5])
             plt.legend(handles=[blue_line, red_line], loc='center')
             for trajectory in rollout:
-                env_infos = trajectory['env_infos']
+                env_infos = trajectory['env_infos'][:-1]
                 is_coll = env_infos[-1]['coll']
                 pos_x = []
                 pos_y = []

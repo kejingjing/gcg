@@ -1,7 +1,7 @@
 import tensorflow as tf
 
-from . import rnn_cell
-from .weight_norm import fully_connected_weight_norm, conv2d_weight_norm
+from gcg.policies.tf import rnn_cell
+from gcg.policies.tf.weight_norm import fully_connected_weight_norm, conv2d_weight_norm
 
 def convnn(
         inputs,

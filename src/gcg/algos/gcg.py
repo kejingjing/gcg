@@ -3,8 +3,6 @@ import numpy as np
 
 from gcg.envs.env_utils import create_env
 from gcg.policies.gcg_policy import GCGPolicy
-from gcg.policies.probcoll_gcg_policy import ProbcollGCGPolicy
-from gcg.policies.multisensor_gcg_policy import MultisensorGCGPolicy
 from gcg.sampler.sampler import Sampler
 from gcg.data.timer import timeit
 from gcg.data.logger import logger
@@ -62,17 +60,16 @@ class GCG(object):
         self._learn_after_n_steps = int(alg_args['learn_after_n_steps'])
         self._train_every_n_steps = alg_args['train_every_n_steps']
         self._eval_every_n_steps = int(alg_args['eval_every_n_steps'])
+        self._rollouts_per_eval = int(alg_args.get('rollouts_per_eval', 1))
         self._save_every_n_steps = int(alg_args['save_every_n_steps'])
         self._update_target_after_n_steps = int(alg_args['update_target_after_n_steps'])
         self._update_target_every_n_steps = int(alg_args['update_target_every_n_steps'])
-        self._update_preprocess_every_n_steps = int(alg_args['update_preprocess_every_n_steps'])
         self._log_every_n_steps = int(alg_args['log_every_n_steps'])
         assert (self._learn_after_n_steps % self._sampler.n_envs == 0)
         if self._train_every_n_steps >= 1:
             assert (int(self._train_every_n_steps) % self._sampler.n_envs == 0)
         assert (self._save_every_n_steps % self._sampler.n_envs == 0)
         assert (self._update_target_every_n_steps % self._sampler.n_envs == 0)
-        assert (self._update_preprocess_every_n_steps % self._sampler.n_envs == 0)
 
     #############
     ### Files ###
@@ -222,28 +219,24 @@ class GCG(object):
             if step > self._sample_after_n_steps:
                 timeit.start('sample')
                 self._sampler.step(step,
-                                   take_random_actions=(step <= self._learn_after_n_steps or
-                                                        step <= self._onpolicy_after_n_steps),
+                                   take_random_actions=(step <= self._onpolicy_after_n_steps),
                                    explore=True)
                 timeit.stop('sample')
 
             ### sample and DON'T add to buffer (for validation)
             if self._eval_sampler is not None and step > 0 and step % self._eval_every_n_steps == 0:
                 timeit.start('eval')
-                eval_rollouts_step = []
-                eval_step = step
-                while len(eval_rollouts_step) == 0:
-                    self._eval_sampler.step(eval_step, explore=False)
-                    eval_rollouts_step = self._eval_sampler.get_recent_paths()
-                    eval_step += 1
-                eval_rollouts += eval_rollouts_step
+                for _ in range(self._rollouts_per_eval):
+                    eval_rollouts_step = []
+                    eval_step = step
+                    while len(eval_rollouts_step) == 0:
+                        self._eval_sampler.step(eval_step, explore=False)
+                        eval_rollouts_step = self._eval_sampler.get_recent_paths()
+                        eval_step += 1
+                    eval_rollouts += eval_rollouts_step
                 timeit.stop('eval')
 
             if step >= self._learn_after_n_steps:
-                ### update preprocess
-                if step == self._learn_after_n_steps or step % self._update_preprocess_every_n_steps == 0:
-                    self._policy.update_preprocess(self._sampler.statistics)
-
                 ### training step
                 if self._train_every_n_steps >= 1:
                     if step % int(self._train_every_n_steps) == 0:

@@ -1,14 +1,13 @@
 import os
 from math import pi
-
+from collections import OrderedDict
 import numpy as np
 
 from gcg.envs.rccar.square_env import SquareEnv
-
+from gcg.envs.spaces.box import Box
 
 class RoomClutteredEnv(SquareEnv):
     def __init__(self, params={}):
-        
         #TODO
         self._goal_heading = np.array([0.])
         self._base_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'models')
@@ -16,7 +15,12 @@ class RoomClutteredEnv(SquareEnv):
         params.setdefault('obj_paths', ['bookcase.egg', 'chair.egg', 'coffee_table.egg', 'desk.egg', 'stool.egg', 'table.egg'])
         self._obj_paths = [os.path.join(self._base_dir, x) for x in params['obj_paths']]
         
+        self._obstacles = []
         SquareEnv.__init__(self, params=params)
+
+    def _setup_spec(self):
+        SquareEnv._setup_spec(self)
+        self.goal_spec['heading'] = Box(low=0, high=2 * 3.14) 
 
     def _default_pos(self):
         return (20.0, -20., 0.3)
@@ -32,26 +36,15 @@ class RoomClutteredEnv(SquareEnv):
                 angle = oris[(index // max_len) % 4]
                 hpr = (angle, 0.0, 0.0)
                 self._setup_collision_object(path, pos, hpr)
+                self._obstacles.append((path, pos, hpr))
                 index += 1
         self._setup_collision_object(self._model_path)
 
-    def _get_observation(self):
-        im, vec = super(RoomClutteredEnv, self)._get_observation()
-
-        vec = np.hstack([vec, self._goal_heading])
-        return im, vec
+    def _get_goal(self):
+        goal = np.array(self._goal_heading)
+        return goal
 
     def _get_reward(self):
-        if self._collision_reward_only:
-            if self._collision:
-                reward = -1.0
-            else:
-                reward = 0
-        else:
-            reward = self._real_reward()
-        return reward
-        
-    def _real_reward(self):
         if self._collision:
             reward = self._collision_reward
         else:
@@ -79,7 +72,6 @@ class RoomClutteredEnv(SquareEnv):
         if num == 0:
             return None, None
         else:
-            # TODO
             pos_hpr = self._restart_pos[self._restart_index]
             goal = self._default_restart_goal()[self._restart_index]
             self._restart_index = (self._restart_index + 1) % num
@@ -93,7 +85,6 @@ class RoomClutteredEnv(SquareEnv):
     def max_reward(self):
         return 1.0
 
-    # TODO
     def reset(self):
         if self._do_back_up:
             if self._collision:
@@ -103,7 +94,7 @@ class RoomClutteredEnv(SquareEnv):
             self._place_vehicle(pos=pos, hpr=hpr)
             self._goal_heading = np.array([goal])
         self._collision = False
-        return self._get_observation()
+        return self._get_observation(), self._get_goal()
 
     def _get_info(self):
         info = {}
@@ -112,7 +103,8 @@ class RoomClutteredEnv(SquareEnv):
         info['vel'] = self._get_speed()
         info['goal_h'] =  self._goal_heading
         info['coll'] = self._collision
-        info['reward'] = self._real_reward() 
+        info['reward'] = self._get_reward() 
+        info['obstacles'] = self._obstacles
         return info
 
 if __name__ == '__main__':

@@ -31,17 +31,16 @@ class ReplayPool(object):
         self._replay_pool_params = replay_pool_params # TODO: hack
 
         ### buffer
-        obs_im_shape = self._env_spec.observation_im_space.shape
-        obs_vec_shape = self._env_spec.observation_vec_space.shape
-        obs_im_dim = obs_im_shape[0] * obs_im_shape[1] * obs_im_shape[2]
-        obs_vec_dim = obs_vec_shape[0]
-        action_dim = self._env_spec.action_space.flat_dim
+        self._obs_im_shape = self._env_spec.observation_im_space.shape
+        self._obs_im_dim = np.prod(self._obs_im_shape)
+        self._obs_vec_dim = len(list(self._env_spec.observation_vec_spec.keys())) 
+        self._action_dim = self._env_spec.action_space.flat_dim
         self._steps = np.empty((self._size,), dtype=np.int32)
-        self._observations_im = np.empty((self._size, obs_im_dim), dtype=np.uint8)
-        self._observations_vec = np.ones((self._size, obs_vec_dim), dtype=np.float32)
-        self._actions = np.nan * np.ones((self._size, action_dim), dtype=np.float32)
+        self._observations_im = np.empty((self._size, self._obs_im_dim), dtype=np.uint8)
+        self._observations_vec = np.ones((self._size, self._obs_vec_dim), dtype=np.float32)
+        self._actions = np.nan * np.ones((self._size, self._action_dim), dtype=np.float32)
         self._rewards = np.nan * np.ones((self._size,), dtype=np.float32)
-        self._dones = np.ones((self._size,), dtype=bool) # initialize as all done
+        self._dones = np.zeros((self._size,), dtype=bool) # initialize as all not done
         self._env_infos = np.empty((self._size,), dtype=np.object)
         self._est_values = np.nan * np.ones((self._size,), dtype=np.float32)
         self._values = np.nan * np.ones((self._size,), dtype=np.float32)
@@ -49,11 +48,12 @@ class ReplayPool(object):
         self._sampling_indices = np.zeros((self._size,), dtype=bool)
         self._index = 0
         self._curr_size = 0
+        self._done_indices = []
 
         ### keep track of statistics
         self._stats = defaultdict(int)
-        self._obs_im_mean = (0.5 * 255) * np.ones((1, obs_im_dim))
-        self._obs_im_orth = (0.5 * 255) * np.ones(obs_im_dim)
+        self._obs_im_mean = (0.5 * 255) * np.ones((1, self._obs_im_dim))
+        self._obs_im_orth = (0.5 * 255) * np.ones(self._obs_im_dim)
 
         ### logging
         self._last_done_index = 0
@@ -79,15 +79,11 @@ class ReplayPool(object):
             else:
                 preclipped_indices = list(range(0, end+1))
 
-        # if len(preclipped_indices) == 0:
-        #     import IPython; IPython.embed()
         indices = [preclipped_indices[-1]]
         for index in preclipped_indices[-2::-1]:
             if self._dones[index]:
                 break
             indices.insert(0, index)
-        # if np.any(np.array(indices) > len(self)):
-        #     import IPython; IPython.embed()
         return indices
 
     ##################
@@ -141,13 +137,9 @@ class ReplayPool(object):
     ###################
 
     def store_observation(self, step, observation):
-        obs_im_shape = self._env_spec.observation_im_space.shape
-        obs_vec_shape = self._env_spec.observation_vec_space.shape
-        obs_im_dim = obs_im_shape[0] * obs_im_shape[1] * obs_im_shape[2]
-        obs_vec_dim = obs_vec_shape[0]
         self._steps[self._index] = step
-        self._observations_im[self._index, :] = observation[0].reshape((obs_im_dim,)) #self._env_spec.observation_im_space.flatten(observation)
-        self._observations_vec[self._index, :] = observation[1].reshape((obs_vec_dim,)) #self._env_spec.observation_vec__space.flatten(observation)
+        self._observations_im[self._index, :] = observation[0].reshape((self._obs_im_dim,)) #self._env_spec.observation_im_space.flatten(observation)
+        self._observations_vec[self._index, :] = observation[1].reshape((self._obs_vec_dim,)) #self._env_spec.observation_vec__space.flatten(observation)
 
     def _encode_observation(self, index):
         """ Encodes observation starting at index by concatenating obs_history_len previous """
@@ -191,6 +183,11 @@ class ReplayPool(object):
     def store_effect(self, action, reward, done, env_info, est_value, logprob, flatten_action=True, update_log_stats=True):
         self._actions[self._index, :] = self._env_spec.action_space.flatten(action) if flatten_action else action
         self._rewards[self._index] = reward
+        if self._dones[self._index] and not done:
+            self._done_indices.remove(self._index)
+            assert(self._curr_size + 1 >= self._size)
+        if done:
+            self._done_indices.append(self._index)
         self._dones[self._index] = done
         self._env_infos[self._index] = env_info if self._save_env_infos else None
         self._est_values[self._index] = est_value
@@ -217,8 +214,8 @@ class ReplayPool(object):
                 self._sampling_indices[start_indices[0]] = False
         else:
             raise NotImplementedError
+        self._curr_size = max(self._curr_size, self._index + 1)
         self._index = (self._index + 1) % self._size
-        self._curr_size = max(self._curr_size, self._index)
 
         ### compute values
         if done:
@@ -240,7 +237,7 @@ class ReplayPool(object):
 
         r_len = len(rollout['dones'])
         for i in range(r_len):
-            self.store_observation(start_step + i, rollout['observations'][i])
+            self.store_observation(start_step + i, (rollout['observations_im'][i], rollout['observations_vec'][i]))
             self.store_effect(rollout['actions'][i],
                               rollout['rewards'][i],
                               rollout['dones'][i],
@@ -256,7 +253,7 @@ class ReplayPool(object):
     def trash_current_rollout(self):
         self._actions[self._last_done_index:self._index, :] = np.nan
         self._rewards[self._last_done_index:self._index] = np.nan
-        self._dones[self._last_done_index:self._index] = True
+        self._dones[self._last_done_index:self._index] = False
         self._env_infos[self._last_done_index:self._index] = np.object
         self._est_values[self._last_done_index:self._index] = np.nan
         self._values[self._last_done_index:self._index] = np.nan
@@ -280,12 +277,14 @@ class ReplayPool(object):
 
     def _sample_start_indices(self, batch_size, only_completed_episodes):
         start_indices = []
-        false_indices = self._get_indices(self._index - self._obs_history_len, self._index) + \
-                        self._get_indices(self._index, self._index + self._N)
+        false_indices = self._get_indices(self._index - self._obs_history_len, self._index + self._N)
+        false_indices += self._done_indices
         if only_completed_episodes and self._last_done_index != self._index:
             false_indices += self._get_indices(self._last_done_index, self._index)
 
         if self._sampling_method == 'uniform':
+            hits = 0.
+            tries= 0.
             while len(start_indices) < batch_size:
                 start_index = np.random.randint(low=0, high=len(self) - self._N)
                 if start_index not in false_indices:
@@ -333,7 +332,9 @@ class ReplayPool(object):
             values_i = self._values[indices]
             dones_i = self._dones[indices]
             logprobs_i = self._logprobs[indices]
-            # TODO figure out best way of doing extending of observations
+            if dones_i[0]:
+                import IPython; IPython.embed()
+                print('issue')
             if np.any(dones_i[:-1]):
                 # H = 3
                 # observations = [0 1 2 3]
@@ -342,8 +343,8 @@ class ReplayPool(object):
                 # dones = [False True False False]
 
                 d_idx = np.argmax(dones_i)
-                for j in range(d_idx + 1, len(dones_i)):
-                    # observations_i[j+self._obs_history_len-1, :] = 0.
+                # TODO maybe wrong
+                for j in range(d_idx, len(dones_i)):
                     actions_i[j, :] = self._env_spec.action_space.flatten(self._env_spec.action_space.sample())
                     rewards_i[j] = 0.
                     values_i[j] = 0.
@@ -429,14 +430,9 @@ class ReplayPool(object):
         rewards = self._rewards[indices]
         est_values = self._est_values[indices]
         values = self._values[indices]
-        if self._save_env_infos:
-            env_infos = self._env_infos[indices] 
-            rewards = [info['reward'] for info in env_infos]
-            self._log_stats['AvgCollision'].append(env_infos[-1]['coll'])
-        else:
-            rewards = self._rewards[indices]
-            self._log_stats['AvgCollision'].append(int(rewards[-1] < 0.))
-        
+        obs_vec = self._observations_vec[indices]
+        coll_index = list(self._env_spec.observation_vec_spec.keys()).index('coll')
+        self._log_stats['AvgCollision'].append(obs_vec[-1, coll_index])
         self._log_stats['FinalReward'].append(rewards[-1])
         self._log_stats['AvgReward'].append(np.mean(rewards))
         self._log_stats['CumReward'].append(np.sum(rewards))

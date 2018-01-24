@@ -17,9 +17,13 @@ class Box(Space):
             Box(np.array([-1.0,-2.0]), np.array([2.0,4.0])) # low and high are arrays of the same shape
         """
         if shape is None:
-            assert low.shape == high.shape
-            self.low = low
-            self.high = high
+            if np.isscalar(low) and np.isscalar(high):
+                self.low = np.array([low])
+                self.high = np.array([high])
+            else:
+                assert low.shape == high.shape
+                self.low = low
+                self.high = high
         else:
             assert np.isscalar(low) and np.isscalar(high)
             self.low = low + np.zeros(shape)

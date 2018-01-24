@@ -22,6 +22,7 @@ class SimpleRoomClutteredEnv(RoomClutteredEnv):
                     angle = oris[(index // max_len) % 4]
                     hpr = (angle, 0.0, 0.0)
                     self._setup_collision_object(path, pos, hpr)
+                    self._obstacles.append((path, pos, hpr))
                     index += 1
         self._setup_collision_object(self._model_path)
 

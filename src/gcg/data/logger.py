@@ -2,7 +2,7 @@ import os, csv
 import logging
 from colorlog import ColoredFormatter
 
-from .tabulate import tabulate
+from gcg.data.tabulate import tabulate
 
 class LoggerClass(object):
     GLOBAL_LOGGER_NAME = '_global_logger'

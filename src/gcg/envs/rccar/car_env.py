@@ -1,5 +1,6 @@
 import sys
 from math import pi
+from collections import OrderedDict
 
 import cv2
 import numpy as np
@@ -23,7 +24,7 @@ from panda3d.core import loadPrcFileData
 from gcg.envs.env_spec import EnvSpec
 from gcg.envs.rccar.panda3d_camera_sensor import Panda3dCameraSensor
 from gcg.envs.spaces.box import Box
-
+from gcg.envs.spaces.discrete import Discrete
 
 class CarEnv(DirectObject):
     def __init__(self, params={}):
@@ -37,8 +38,6 @@ class CarEnv(DirectObject):
         self._use_back_cam = self._params.get('use_back_cam', False)
         # TODO
         self._collision_reward = self._params.get('collision_reward', 0.0)
-#        self._collision_reward = self._params.get('collision_reward', -1.0 * self.max_reward * self.horizon)
-        self._collision_reward_only = self._params.get('collision_reward_only', False)
         self._obs_shape = self._params.get('obs_shape', (64, 36))
         self._steer_limits = params.get('steer_limits', (-30., 30.))
         self._speed_limits = params.get('speed_limits', (-4.0, 4.0))
@@ -147,23 +146,44 @@ class CarEnv(DirectObject):
         self._engineClamp = self._accelClamp * self._mass
         self._collision = False
 
-        if self._fixed_speed:
-            self.action_space = Box(low=np.array([-1., 1.]), high=np.array([1., 1.]))
-        else:
-            # TODO ask Greg
-            self.action_space = Box(low=np.array([-1., -1.]), high=np.array([1., 1.]))
-        self._unnormalized_action_space = Box(low=np.array([self._steer_limits[0], self._speed_limits[0]]),
-                                              high=np.array([self._steer_limits[1], self._speed_limits[1]]))
+        self._setup_spec()
 
-        self.observation_im_space = Box(low=0, high=255, shape=tuple(self._get_observation()[0].shape))
-        self.observation_vec_space = Box(low=0, high=2 * 3.14, shape=tuple(self._get_observation()[1].shape))
-
-        self.spec = EnvSpec(self.observation_im_space, self.observation_vec_space, self.action_space)
+        self.spec = EnvSpec(self.observation_im_space, self.action_space, self.observation_vec_spec, self.action_spec, self.goal_spec)
 
         if self._run_as_task:
             self._mark_d = 0.0
             taskMgr.add(self._update_task, 'updateWorld')
             base.run()
+
+    def _setup_spec(self):
+        self.action_spec = OrderedDict()
+        self.unnormalized_action_spec = OrderedDict()
+        self.observation_vec_spec = OrderedDict()
+        self.goal_spec = OrderedDict()
+
+        self.action_spec['steer'] = Box(low=-1., high=1.)
+
+        if self._fixed_speed:
+            self.action_spec['speed'] = Box(low=1., high=1.)            
+            self.action_space = Box(low=np.array([-1., 1.]), high=np.array([1., 1.]))
+        else:
+            self.action_spec['speed'] = Box(low=-1., high=1.)
+            self.action_space = Box(low=np.array([-1., -1.]), high=np.array([1., 1.]))
+        
+        self.unnormalized_action_spec['steer'] = Box(low=self._steer_limits[0], high=self._steer_limits[1])
+
+        self.unnormalized_action_spec['speed'] = Box(low=self._speed_limits[0], high=self._speed_limits[1])
+        
+        self.unnormalized_action_space = Box(low=np.array([self._steer_limits[0], self._speed_limits[0]]),
+                                              high=np.array([self._steer_limits[1], self._speed_limits[1]]))
+
+        self.observation_im_space = Box(low=0, high=255, shape=tuple(self._get_observation()[0].shape))
+
+        self.observation_vec_spec['coll'] = Discrete(1)
+        self.observation_vec_spec['heading'] = Box(low=0, high=2 * 3.14)
+        # TODO figure out top speed
+#        self.spec = EnvSpec(self.observation_im_space, self.observation_vec_spec, self.action_spec, self.goal_spec)
+#        self.spec = EnvSpec(self.observation_im_space, self.observation_vec_space, self.action_space)
 
     @property
     def horizon(self):
@@ -446,8 +466,14 @@ class CarEnv(DirectObject):
         if self._use_back_cam:
             self._back_obs = self._back_camera_sensor.observe()
             observation.append(self.process(self._back_obs[0], self._obs_shape))
-        observation = np.concatenate(observation, axis=2)
-        return observation
+        observation_im = np.concatenate(observation, axis=2)
+        coll = self._collision
+        heading = self._get_heading()
+        observation_vec = np.array([coll, heading])
+        return observation_im, observation_vec
+
+    def _get_goal(self):
+        return np.array([])
 
     def process(self, image, obs_shape):
         if self._use_depth:
@@ -463,20 +489,6 @@ class CarEnv(DirectObject):
             return im.astype(np.uint8)
 
     def _get_reward(self):
-        if self._collision_reward_only:
-            reward = self._collision_only_reward()
-        else:
-            reward = self._real_reward()
-        return reward
-       
-    def _collision_only_reward(self):
-        if self._collision:
-            reward = self._collision_reward
-        else:
-            reward = 0
-        return reward
-
-    def _real_reward(self):
         if self._collision:
             reward = self._collision_reward
         else:
@@ -500,13 +512,12 @@ class CarEnv(DirectObject):
         back_up_vel = self._params['back_up'].get('vel', -2.0) 
         self._des_vel = back_up_vel
         back_up_steer = self._params['back_up'].get('steer', (-5.0, 5.0))
-        # TODO
         self._steering = np.random.uniform(*back_up_steer)
         self._brakeForce = 0.
         duration = self._params['back_up'].get('duration', 1.0)
         self._update(dt=duration)
-        self._des_vel = 0.0
-        self._steering = 0.0
+        self._des_vel = 0.
+        self._steering = 0.
         self._update(dt=duration)
         self._brakeForce = 0.
 
@@ -530,9 +541,18 @@ class CarEnv(DirectObject):
                     pos, hpr = self._next_restart_pos_hpr()
             self._place_vehicle(pos=pos, hpr=hpr)
         self._collision = False
-        return self._get_observation()
+        return self._get_observation(), self._get_goal()
 
     def step(self, action):
+        lb, ub = self.unnormalized_action_space.bounds
+        scaled_action = lb + (action + 1.) * 0.5 * (ub - lb)
+        scaled_action = np.clip(scaled_action, lb, ub)
+
+        if self._fixed_speed:
+            scaled_action[1] = self._speed_limits[0]
+        
+        action = scaled_action
+        
         self._steering = action[0]
         if action[1] == 0.0:
             self._brakeForce = 1000.
@@ -547,10 +567,11 @@ class CarEnv(DirectObject):
         
         self._update(dt=self._dt)
         observation = self._get_observation()
+        goal = self._get_goal()
         reward = self._get_reward() 
         done = self._get_done()
         info = self._get_info()
-        return observation, reward, done, info
+        return observation, goal, reward, done, info
 
 if __name__ == '__main__':
     params = {'visualize': True, 'run_as_task': True}

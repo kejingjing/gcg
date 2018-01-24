@@ -1,6 +1,5 @@
 import itertools
 import pickle
-
 import numpy as np
 
 from gcg.envs.spaces.discrete import Discrete
@@ -94,10 +93,11 @@ class Sampler(object):
                 steps=list(range(step, step + self._n_envs)),
                 current_episode_steps=self._vec_env.current_episode_steps,
                 observations=(encoded_observations_im, encoded_observations_vec),
+                goals=self._curr_goals,
                 explore=explore)
 
         ### take step
-        next_observations, rewards, dones, env_infos = self._vec_env.step(actions)
+        next_observations, goals, rewards, dones, env_infos = self._vec_env.step(actions)
         for env_info, action_info in zip(env_infos, action_infos):
             env_info.update(action_info)
 
@@ -110,6 +110,7 @@ class Sampler(object):
             replay_pool.store_effect(action, reward, done, env_info, est_value, logprob)
 
         self._curr_observations = next_observations
+        self._curr_goals = goals 
 
     def trash_current_rollouts(self):
         """ In case an error happens """
@@ -119,7 +120,7 @@ class Sampler(object):
         return steps_removed
 
     def reset(self):
-        self._curr_observations = self._vec_env.reset()
+        self._curr_observations, self._curr_goals = self._vec_env.reset()
         for replay_pool in self._replay_pools:
             replay_pool.force_done()
 
