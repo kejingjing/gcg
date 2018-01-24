@@ -252,23 +252,18 @@ class MACPolicy(Parameterized, Serializable):
         # tf.assert_equal(tf.shape(tf_obs_lowd)[0], tf.shape(tf_actions_ph)[0])
 
         self._action_graph.update({'output_dim': self._observation_graph['output_dim']})
-        action_dim = tf_actions_ph.get_shape()[2].value
-        actions = tf.reshape(tf_actions_ph, (-1, action_dim))
-        rnn_inputs, _ = networks.fcnn(actions, self._action_graph, is_training=is_training, scope='fcnn_actions',
+        rnn_inputs, _ = networks.fcnn(tf_actions_ph, self._action_graph, is_training=is_training, scope='fcnn_actions',
                                       T=H, global_step_tensor=self.global_step, num_dp=num_dp)
-        rnn_inputs = tf.reshape(rnn_inputs, (-1, H, self._action_graph['output_dim']))
 
         rnn_outputs, _ = networks.rnn(rnn_inputs, self._rnn_graph, initial_state=tf_obs_lowd, num_dp=num_dp)
-        rnn_output_dim = rnn_outputs.get_shape()[2].value
-        rnn_outputs = tf.reshape(rnn_outputs, (-1, rnn_output_dim))
 
         self._output_graph.update({'output_dim': 1})
         tf_nstep_rewards, _ = networks.fcnn(rnn_outputs, self._output_graph, is_training=is_training, scope='fcnn_rewards',
                                             T=H, global_step_tensor=self.global_step, num_dp=num_dp)
         tf_nstep_values, _ = networks.fcnn(rnn_outputs, self._output_graph, is_training=is_training, scope='fcnn_values',
                                            T=H, global_step_tensor=self.global_step, num_dp=num_dp)
-        tf_nstep_rewards = tf.unstack(tf.reshape(tf_nstep_rewards, (-1, H)), axis=1)
-        tf_nstep_values = tf.unstack(tf.reshape(tf_nstep_values, (-1, H)), axis=1)
+        tf_nstep_rewards = tf.unstack(tf_nstep_rewards[:, :, 0], axis=1)
+        tf_nstep_values = tf.unstack(tf_nstep_values[:, :, 0], axis=1)
 
         tf_values_list = [self._graph_calculate_value(h, tf_nstep_rewards, tf_nstep_values) for h in range(H)]
         tf_values_list += [tf_values_list[-1]] * (N - H)
