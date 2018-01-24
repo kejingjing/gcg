@@ -18,11 +18,12 @@ from sandbox.gkahn.gcg.policies.rccar_mac_policy import RCcarMACPolicy
 # TODO: import new models
 
 class EvalOffline(object):
-    def __init__(self, yaml_path, bootstrapping, main_model=None):
+    def __init__(self, yaml_path, bootstrapping, main_model=None, bootstrap_index=None):
         with open(yaml_path, 'r') as f:
             self._params = yaml.load(f)
 
         self._bootstrapping = bootstrapping
+        self._bootstrap_index = bootstrap_index
 
         self._folder = os.path.splitext(yaml_path)[0]
         os.makedirs(self._folder, exist_ok=True)
@@ -38,6 +39,7 @@ class EvalOffline(object):
         self._model = self._create_model()
         logger.info('Loading data')
         self._replay_pool = self._load_data(self._params['offline']['data'])
+        self._replay_holdout_pool = self._load_data(self._params['offline']['data_holdout'])
         if self._params['offline']['checkpoint'] is not None:
             logger.info('Loading checkpoint')
             self._model.restore(self._params['offline']['checkpoint'])
@@ -185,12 +187,12 @@ class EvalOffline(object):
         return rewards
 
     @staticmethod
-    def evaluate(main_model, all_models, bootstrapping):
+    def evaluate(main_model, all_models, bootstrapping, replay_pool, plotter):
         logger.info('Evaluating model')
 
         ### sample from the data, get the outputs
         sample_size = 200
-        steps, observations, actions, rewards, values, dones, logprobs = main_model._replay_pool.sample(sample_size)
+        steps, observations, actions, rewards, values, dones, logprobs = replay_pool.sample(sample_size)
         rewards = EvalOffline.clean_rewards(rewards)
         observations = observations[:, :main_model._model.obs_history_len, :]
 
@@ -205,19 +207,20 @@ class EvalOffline(object):
                 outputs.append(model._model.get_model_outputs(observations, actions))
         outputs = np.asarray(outputs)  # num_bnn_samples x sample_size x action_len
 
-        import IPython; IPython.embed()
-        BnnPlotter.plot_dropout(outputs, rewards)
+        plotter(outputs, rewards)
+        # import IPython; IPython.embed()
+        # BnnPlotter.plot_dropout(outputs, rewards)
         # BnnPlotter.plot_predtruth(outputs, rewards)
-        BnnPlotter.plot_hist(outputs, rewards)
-        BnnPlotter.plot_hist_no_time_structure(outputs, rewards)
-        BnnPlotter.plot_roc(outputs, rewards)
-        BnnPlotter.plot_scatter_prob_and_sigma(outputs, rewards)
+        # BnnPlotter.plot_hist(outputs, rewards)
+        # BnnPlotter.plot_hist_no_time_structure(outputs, rewards)
+        # BnnPlotter.plot_roc(outputs, rewards)
+        # BnnPlotter.plot_scatter_prob_and_sigma(outputs, rewards)
 
-        import pickle
-        file_outputs = open("outputs.pkl", 'wb')
-        file_rewards = open("rewards.pkl", 'wb')
-        pickle.dump(outputs, file_outputs)
-        pickle.dump(rewards, file_rewards)
+        # import pickle
+        # file_outputs = open("outputs.pkl", 'wb')
+        # file_rewards = open("rewards.pkl", 'wb')
+        # pickle.dump(outputs, file_outputs)
+        # pickle.dump(rewards, file_rewards)
 
         # file_outputs = open("outputs.pkl", 'rb')
         # file_outputs.seek(0)
@@ -245,11 +248,11 @@ if __name__ == '__main__':
     main_model = EvalOffline(yaml_path, bootstrapping=False)  # do not train, just a data_loader
     all_models = []
     for i in range(num_bootstraps):
-        model = EvalOffline(yaml_path, bootstrapping, main_model)
+        model = EvalOffline(yaml_path, bootstrapping, main_model, i)
         if not args.no_train:
             model.train()
         all_models.append(model)
 
-    EvalOffline.evaluate(main_model, all_models, bootstrapping)
-
-
+    import IPython; IPython.embed()
+    EvalOffline.evaluate(main_model, all_models, bootstrapping, main_model._replay_pool, BnnPlotter.plot_dropout)
+    EvalOffline.evaluate(main_model, all_models, bootstrapping, main_model._replay_holdout_pool, BnnPlotter.plot_dropout)

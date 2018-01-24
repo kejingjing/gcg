@@ -15,6 +15,7 @@ def create_env(env_str, is_normalize=True, seed=None):
     try:
         from sandbox.gkahn.gcg.envs.rccar.square_env import SquareEnv
         from sandbox.gkahn.gcg.envs.rccar.square_cluttered_env import SquareClutteredEnv
+        from sandbox.gkahn.gcg.envs.rccar.square_cluttered_holdout_env import SquareClutteredHoldoutEnv
         from sandbox.gkahn.gcg.envs.rccar.cylinder_env import CylinderEnv
     except:
         logger.debug('Unable to import sim rccar')
