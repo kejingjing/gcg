@@ -5,8 +5,8 @@ from gcg.envs.rccar.room_cluttered_env import RoomClutteredEnv
 class SimpleRoomClutteredEnv(RoomClutteredEnv):
     def __init__(self, params={}):
         self._base_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'models')
-        params.setdefault('model_path', os.path.join(self._base_dir, 'small_room.egg'))
-        params.setdefault('obj_paths', ['bookcase.egg'])
+        params.setdefault('model_path', os.path.join(self._base_dir, 'small_room_realistic.egg'))
+        params.setdefault('obj_paths', ['tree1.egg'])
         RoomClutteredEnv.__init__(self, params=params)
 
     def _setup_map(self):
@@ -17,11 +17,11 @@ class SimpleRoomClutteredEnv(RoomClutteredEnv):
         for i in range(2, 27, 5):
             for j in range(2, 27, 5):
                 if (i != 2 and i != 22) or (j!=2 and j!=22): 
-                    pos = (i - 12., j - 12., 0.3)
+                    pos = (i - 12., j - 12., 0.35)
                     path = self._obj_paths[index % max_len]
                     angle = oris[(index // max_len) % 4]
                     hpr = (angle, 0.0, 0.0)
-                    self._setup_collision_object(path, pos, hpr)
+                    self._setup_collision_object(path, pos, hpr, scale=0.6)
                     index += 1
         self._setup_collision_object(self._model_path)
 

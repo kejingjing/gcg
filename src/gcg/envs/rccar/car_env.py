@@ -249,12 +249,13 @@ class CarEnv(DirectObject):
             ground.setCollideMask(BitMask32.allOn())
             self._world.attachRigidBody(ground.node())
 
-    def _setup_collision_object(self, path, pos=(0.0, 0.0, 0.0), hpr=(0.0, 0.0, 0.0)):
+    def _setup_collision_object(self, path, pos=(0.0, 0.0, 0.0), hpr=(0.0, 0.0, 0.0), scale=1):
         visNP = loader.loadModel(path)
         visNP.clearModelNodes()
         visNP.reparentTo(render)
         visNP.setPos(pos[0], pos[1], pos[2])
         visNP.setHpr(hpr[0], hpr[1], hpr[2])
+        visNP.set_scale(scale, scale, scale)
         bodyNPs = BulletHelper.fromCollisionSolids(visNP, True)
         for bodyNP in bodyNPs:
             bodyNP.reparentTo(render)
