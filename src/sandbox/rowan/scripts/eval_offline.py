@@ -5,52 +5,83 @@ import yaml
 
 import numpy as np
 
-from gcg.data import logger
+from gcg.data.logger import logger
 from gcg.envs.env_utils import create_env
 from gcg.data import mypickle
 from gcg.sampler.replay_pool import ReplayPool
 
 from gcg.policies.gcg_policy import GCGPolicy
 
-from .bnn_plotter import BnnPlotter
+from bnn_plotter import BnnPlotter
 
 class EvalOffline(object):
-    def __init__(self, yaml_path, bootstrapping, main_model=None, bootstrap_index=None):
+    def __init__(self, yaml_path):
         with open(yaml_path, 'r') as f:
             self._params = yaml.load(f)
 
-        self._bootstrapping = bootstrapping
-        self._bootstrap_index = bootstrap_index
-
-        self._folder = os.path.splitext(yaml_path)[0]
-        os.makedirs(self._folder, exist_ok=True)
-        logger.setup(display_name=params['exp_name'],
-                     log_path=os.path.join(self._folder, 'log.txt'),
-                     lvl=params['log_level'])
+        logger.setup(display_name=self._params['exp_name'],
+                     log_path=os.path.join(self._save_dir, 'log.txt'),
+                     lvl=self._params['log_level'])
 
         logger.info('Yaml {0}'.format(yaml_path))
 
+        logger.info('')
         logger.info('Creating environment')
-        if main_model is None:
-            self._env = create_env(self._params['alg']['env'])
-        else:
-            self._env = main_model._env
+        self._env = create_env(self._params['alg']['env'])
 
+        logger.info('')
         logger.info('Creating model')
         self._model = self._create_model()
 
+        logger.info('')
         logger.info('Loading data')
-        self._replay_pool = self._load_data(self._params['offline']['data'])
-        self._replay_holdout_pool = self._load_data(self._params['offline']['data_holdout'])
+        self._replay_pool = self._load_data(self._data_file_name)
+        logger.info('Size of replay pool: {0:d}'.format(len(self._replay_pool)))
+        self._replay_holdout_pool = self._load_data(self._data_holdout_file_name)
+        logger.info('Size of holdout replay pool: {0:d}'.format(len(self._replay_holdout_pool)))
 
         # TODO: load specific parts
-        if self._params['offline']['checkpoint'] is not None:
-            logger.info('Loading checkpoint')
-            self._model.restore(self._params['offline']['checkpoint'])
+        if self._init_checkpoint_file_name is not None:
+            logger.info('')
+            logger.info('Loading checkpoint {0} for {1}'.format(self._init_checkpoint_file_name,
+                                                                self._params['offline']['init_restore']))
+            self._model.restore(self._init_checkpoint_file_name,
+                                train_restore=self._params['offline']['init_restore'])
 
-        if self._params['offline']['checkpoint_bnn_preprocessing'] is not None:  # TODO: both can't be true, fix.
-            logger.info('Loading bnn checkpoint')
-            self._model.restore_bnn_preprocessing(self._params['offline']['checkpoint_bnn_preprocessing'])
+        self._restore_train_policy()
+
+    #############
+    ### Files ###
+    #############
+
+    @property
+    def _dir(self):
+        file_dir = os.path.realpath(os.path.dirname(__file__))
+        dir = os.path.join(file_dir[:file_dir.find('gcg/src')], 'gcg/data')
+        assert (os.path.exists(dir))
+        return dir
+
+    @property
+    def _data_file_name(self):
+        return os.path.join(self._dir, self._params['offline']['data'])
+
+    @property
+    def _data_holdout_file_name(self):
+        return os.path.join(self._dir, self._params['offline']['data_holdout'])
+
+    @property
+    def _save_dir(self):
+        dir = os.path.join(self._dir, self._params['exp_name'])
+        os.makedirs(dir, exist_ok=True)
+        return dir
+
+    def _train_policy_file_name(self, itr):
+        return os.path.join(self._save_dir, 'itr_{0:04d}_train_policy.ckpt'.format(itr))
+
+    @property
+    def _init_checkpoint_file_name(self):
+        if self._params['offline']['init_checkpoint'] is not None:
+            return os.path.join(self._dir, self._params['offline']['init_checkpoint'])
 
     #############
     ### Model ###
@@ -69,6 +100,22 @@ class EvalOffline(object):
         )
 
         return policy
+
+    def _restore_train_policy(self):
+        """
+        :return: iteration that it is currently on
+        """
+        itr = 0
+        while len(glob.glob(self._train_policy_file_name(itr) + '*')) > 0:
+            itr += 1
+
+        if itr > 0:
+            logger.info('Loading train policy from iteration {0}...'.format(itr - 1))
+            self._policy.restore(self._train_policy_file_name(itr - 1), train=True)
+            logger.info('Loaded train policy!')
+
+    def _save_train_policy(self, save_itr):
+        self._model.save(self._train_policy_file_name(save_itr), train=True)
 
     ############
     ### Data ###
@@ -90,12 +137,6 @@ class EvalOffline(object):
                 num_load_fail += 1
         logger.info('Files successfully loaded: {0:.2f}%'.format(100. * num_load_success /
                                                                  float(num_load_success + num_load_fail)))
-
-        # TODO: rowan
-        if self._bootstrapping:
-            num_rollouts = len(rollouts)
-            ensemble_indices = np.random.choice(num_rollouts, size=num_rollouts, replace=True)
-            rollouts = [rollouts[i] for i in ensemble_indices]
 
         replay_pool = ReplayPool(
             env_spec=self._env.spec,
@@ -121,9 +162,6 @@ class EvalOffline(object):
     #############
     ### Train ###
     #############
-
-    def _model_checkpoint(self, itr):
-        return os.path.join(self._folder, 'itr_{0:04d}_train_policy.ckpt'.format(itr))
 
     def train(self):
         logger.info('Training model')
@@ -154,53 +192,44 @@ class EvalOffline(object):
             ### save model
             if step > 0 and step % save_every_n_steps == 0:
                 logger.info('Saving files for itr {0}'.format(save_itr))
-                self._model.save(self._model_checkpoint(save_itr), train=True)
+                self._save_train_policy(save_itr)
                 save_itr += 1
 
         ### always save the end
-        self._model.save(self._model_checkpoint(save_itr), train=True)
+        self._save_train_policy(save_itr)
 
     ################
     ### Evaluate ###
     ################
 
-    @staticmethod
-    def clean_rewards(rewards):
-        """
-
-        :param rewards: sample_size x action_len. format (negative) 0000010000
-        :return: returns rewards                  format (negative) 0000011111
-        """
-        import numpy as np
-        for reward_row in rewards:
-            i = np.where(reward_row==-1)[0]
-            if i.size > 0:
-                i = min(i)
-                reward_row[i:] = -1
-        return rewards
-
-    @staticmethod
-    def evaluate(main_model, all_models, bootstrapping, replay_pool, plotter):
+    def evaluate(self, plotter, eval_on_holdout=False):
         logger.info('Evaluating model')
+
+        if eval_on_holdout:
+            replay_pool = self._replay_holdout_pool
+        else:
+            replay_pool = self._replay_pool
+
+        # get collision idx in obs_vec
+        vec_spec = self._env.observation_vec_spec
+        obs_vec_start_idxs = np.cumsum([space.flat_dim for space in vec_spec.values()]) - 1
+        coll_idx = obs_vec_start_idxs[list(vec_spec.keys()).index('coll')]
 
         ### sample from the data, get the outputs
         sample_size = 200
-        steps, observations, actions, rewards, values, dones, logprobs = replay_pool.sample(sample_size)
-        rewards = EvalOffline.clean_rewards(rewards)
-        observations = observations[:, :main_model._model.obs_history_len, :]
+        steps, (observations_im, observations_vec), actions, rewards, values, dones, logprobs = replay_pool.sample(sample_size)
+        observations = (observations_im[:, :self._model.obs_history_len, :],
+                        observations_vec[:, :self._model.obs_history_len, :])
+        labels = (np.cumsum(observations_vec[:, self._model.obs_history_len:, coll_idx], axis=1) >= 1.).astype(float)
 
-        outputs = []
-        if bootstrapping:
-            for model in all_models:
-                outputs.append(model._model.get_model_outputs(observations, actions))
-        else:
-            model = all_models[0]
-            num_bnn_samples = 1000
-            for _ in range(num_bnn_samples):
-                outputs.append(model._model.get_model_outputs(observations, actions))
-        outputs = np.asarray(outputs)  # num_bnn_samples x sample_size x action_len
+        num_bnn_samples = 1000
+        preds = []
+        for _ in range(num_bnn_samples):
+            yhats, bhats = self._model.get_model_outputs(observations, actions)
+            preds.append(yhats['coll'])
+        preds = np.asarray(preds)
 
-        plotter(outputs, rewards)
+        plotter(preds, labels)
         # import IPython; IPython.embed()
         # BnnPlotter.plot_dropout(outputs, rewards)
         # BnnPlotter.plot_predtruth(outputs, rewards)
@@ -227,25 +256,18 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('yaml', type=str, help='yaml file with all parameters')
     parser.add_argument('--no_train', action='store_true', help='do not train model on data')
-    parser.add_argument('-yamldir', type=str, default=os.path.join(os.path.expanduser('~'),
-                                                                   'code/gcg/data/local/offline'))
+    parser.add_argument('--no_eval', action='store_true', help='do not evaluate model')
     args = parser.parse_args()
 
-    yaml_path = os.path.join(args.yamldir, args.yaml)
-    with open(yaml_path, 'r') as f:
-        params = yaml.load(f)
-        bootstrapping = params['policy']['RCcarMACPolicy']['output_graph']['bnn_method'] == 'bootstrap'
+    curr_dir = os.path.realpath(os.path.dirname(__file__))
+    yaml_dir = os.path.join(curr_dir[:curr_dir.find('gcg/src')], 'gcg/yamls')
+    assert (os.path.exists(yaml_dir))
+    yaml_path = os.path.join(yaml_dir, args.yaml)
 
-    num_bootstraps = 20 if bootstrapping else 1
+    model = EvalOffline(yaml_path)
+    if not args.no_train:
+        model.train()
 
-    main_model = EvalOffline(yaml_path, bootstrapping=False)  # do not train, just a data_loader
-    all_models = []
-    for i in range(num_bootstraps):
-        model = EvalOffline(yaml_path, bootstrapping, main_model, i)
-        if not args.no_train:
-            model.train()
-        all_models.append(model)
-
-    import IPython; IPython.embed()
-    EvalOffline.evaluate(main_model, all_models, bootstrapping, main_model._replay_pool, BnnPlotter.plot_dropout)
-    EvalOffline.evaluate(main_model, all_models, bootstrapping, main_model._replay_holdout_pool, BnnPlotter.plot_dropout)
+    if not args.no_eval:
+        model.evaluate(BnnPlotter.plot_dropout, eval_on_holdout=False)
+        model.evaluate(BnnPlotter.plot_dropout, eval_on_holdout=True)

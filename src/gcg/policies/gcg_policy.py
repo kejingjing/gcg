@@ -609,13 +609,10 @@ class GCGPolicy(object):
             target_bhats = OrderedDict()
         ### update target network
         if self._use_target and self._separate_target_params:
-            tf_policy_vars_nobatchnorm = list(filter(lambda v: 'biased' not in v.name and 'local_step' not in v.name,
-                                                     tf_policy_vars))
             tf_target_vars = sorted(tf.get_collection(tf.GraphKeys.GLOBAL_VARIABLES,
                                                       scope=target_scope), key=lambda v: v.name)
-            assert (len(tf_policy_vars_nobatchnorm) == len(tf_target_vars))
             tf_update_target_fn = []
-            for var, var_target in zip(tf_policy_vars_nobatchnorm, tf_target_vars):
+            for var, var_target in zip(tf_policy_vars, tf_target_vars):
                 assert (var.name.replace(policy_scope, '') == var_target.name.replace(target_scope, ''))
                 tf_update_target_fn.append(var_target.assign(var))
             tf_update_target_fn = tf.group(*tf_update_target_fn)
@@ -625,30 +622,25 @@ class GCGPolicy(object):
 
         return target_values, target_yhats, target_bhats, tf_target_vars, tf_update_target_fn
 
-    def _graph_setup_savers(self, tf_policy_vars, tf_nonpolicy_vars, tf_policy_opt_vars, tf_nonpolicy_opt_vars,
-                            inference_only):
+    def _graph_setup_savers(self, tf_preopt_vars, tf_postopt_vars, inference_only):
         savers_dict = dict()
 
-        savers_dict['inference'] = tf.train.Saver(tf_policy_vars + tf_nonpolicy_vars, max_to_keep=None)
-        if not inference_only:
+        savers_dict['inference'] = tf.train.Saver(set(tf_postopt_vars) - set(tf_preopt_vars), max_to_keep=None)
 
+        if not inference_only:
             def filter_policy_vars(must_contain):
-                return [v for v in tf_policy_vars + tf_policy_opt_vars if must_contain in v.name]
+                return [v for v in tf_preopt_vars if must_contain in v.name]
 
             train_vars = dict()
+            train_vars['train'] = tf.global_variables()
             train_vars['image'] = filter_policy_vars(self._image_scope)
             train_vars['observation'] = filter_policy_vars(self._observation_scope)
             train_vars['action'] = filter_policy_vars(self._action_scope)
-            train_vars['rnn']= filter_policy_vars(self._rnn_scope)
+            train_vars['rnn'] = filter_policy_vars(self._rnn_scope)
             train_vars['output'] = filter_policy_vars(self._output_scope)
-            train_vars['other'] = tf_nonpolicy_vars + tf_nonpolicy_opt_vars
-
-            all_var_names = tuple(sorted([v.name for v in itertools.chain(*train_vars.values())]))
-            global_var_names = tuple(sorted([v.name for v in tf.global_variables()]))
-            assert (all_var_names == global_var_names)
 
             for name, vars in train_vars.items():
-                savers_dict['train_{0}'.format(name)] = tf.train.Saver(vars, max_to_keep=None)
+                savers_dict[name] = tf.train.Saver(vars, max_to_keep=None)
 
         return savers_dict
 
@@ -684,8 +676,11 @@ class GCGPolicy(object):
                 self._graph_setup_action_selection(policy_scope, tf_obs_im_ph, tf_obs_vec_ph, inputs, goals, tf_episode_timesteps_ph, tf_test_es_ph_dict)
 
             ### get policy variables
-            tf_policy_vars = sorted(tf.get_collection(tf.GraphKeys.GLOBAL_VARIABLES, scope=policy_scope), key=lambda v: v.name)
-            tf_nonpolicy_vars = sorted([v for v in tf.global_variables() if v not in tf_policy_vars], key=lambda v: v.name)
+            tf_policy_vars = sorted(tf.get_collection(tf.GraphKeys.GLOBAL_VARIABLES, scope=policy_scope),
+                                    key=lambda v: v.name)
+            tf_trainable_policy_vars = sorted(tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, scope=policy_scope),
+                                    key=lambda v: v.name)
+            tf_preopt_vars = tf.global_variables()
 
             if not self._inference_only:
                 target_inputs = OrderedDict()
@@ -697,19 +692,13 @@ class GCGPolicy(object):
                 
                 ### optimization
                 tf_cost, tf_mse, tf_costs = self._graph_cost(values, yhats, bhats, tf_obs_vec_target_ph, tf_rewards_ph, tf_dones_ph, target_inputs, target_values, target_yhats, target_bhats) 
-                tf_opt, tf_lr_ph = self._graph_optimize(tf_cost, tf_policy_vars)
+                tf_opt, tf_lr_ph = self._graph_optimize(tf_cost, tf_trainable_policy_vars)
             else:
                 tf_target_vars = tf_update_target_fn = tf_cost = tf_mse = tf_opt = tf_lr_ph = None
 
-            ### get opt vars
-            tf_opt_vars = [v for v in tf.global_variables() if v not in tf_policy_vars + tf_nonpolicy_vars]
-            tf_policy_opt_vars = [v for v in tf_opt_vars if policy_scope in v.name]
-            tf_nonpolicy_opt_vars = [v for v in tf_opt_vars if policy_scope not in v.name]
-
             ### savers
-            tf_savers_dict = self._graph_setup_savers(tf_policy_vars, tf_nonpolicy_vars,
-                                                      tf_policy_opt_vars, tf_nonpolicy_opt_vars,
-                                                      self._inference_only)
+            tf_postopt_vars = tf.global_variables()
+            tf_savers_dict = self._graph_setup_savers(tf_preopt_vars, tf_postopt_vars, self._inference_only)
 
             ### initialize
             self._graph_init_vars(tf_sess)
@@ -728,7 +717,8 @@ class GCGPolicy(object):
             'obs_vec_target_ph': tf_obs_vec_target_ph,
             'test_es_ph_dict': tf_test_es_ph_dict,
             'episode_timesteps_ph': tf_episode_timesteps_ph,
-#            'get_value': tf_get_value,
+            'yhats': yhats,
+            'bhats': bhats,
             'get_action': tf_get_action,
             'get_action_explore': tf_get_action_explore,
             'get_action_value': tf_get_action_value,
@@ -852,9 +842,10 @@ class GCGPolicy(object):
             self._tf_dict['obs_vec_ph']: observations_vec,
             self._tf_dict['actions_ph']: actions
         }
-        outputs = self._tf_dict['sess'].run(self._tf_dict['get_value'], feed_dict=feed_dict)
 
-        return outputs
+        yhats, bhats= self._tf_dict['sess'].run([self._tf_dict['yhats'], self._tf_dict['bhats']], feed_dict=feed_dict)
+
+        return yhats, bhats
 
     ######################
     ### Saving/loading ###
@@ -875,11 +866,11 @@ class GCGPolicy(object):
             saver = self._tf_dict['savers_dict'][saver_name]
             saver.save(self._tf_dict['sess'], self._saver_ckpt_name(ckpt_name, saver_name), write_meta_graph=False)
 
-    def restore(self, ckpt_name, train=True, train_restore=('image', 'observation', 'action', 'rnn', 'output')):
-        if train:
-            savers_keys = ['train_{0}'.format(k) for k in train_restore] + ['other']
-        else:
-            savers_keys = ['inference']
+    def restore(self, ckpt_name, train=True, train_restore=('train,')):
+        """
+        :param: train_restore: 'train', 'image', 'observation', 'action', 'rnn', 'output
+        """
+        savers_keys = train_restore if train else ['inference']
 
         for saver_name in savers_keys:
             saver = self._tf_dict['savers_dict'][saver_name]

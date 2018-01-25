@@ -42,6 +42,7 @@ def convnn(
     # Assuming all paddings will be the same type
     padding = params['padding']
     normalizer = params.get('normalizer', None)
+    trainable = params.get('trainable', True)
     next_layer_input = inputs
     with tf.variable_scope(scope, reuse=reuse):
         for i in range(len(kernels)):
@@ -87,7 +88,7 @@ def convnn(
                 weights_initializer=tf.contrib.layers.xavier_initializer_conv2d(dtype=dtype),
                 weights_regularizer=tf.contrib.layers.l2_regularizer(0.5),
                 biases_initializer=tf.constant_initializer(0., dtype=dtype),
-                trainable=True)
+                trainable=trainable)
 
     output = next_layer_input
     # TODO
@@ -156,6 +157,7 @@ def fcnn(
         assert(inputs.get_shape()[1].value == T)
         next_layer_input = tf.reshape(inputs, (-1, inputs.get_shape()[-1].value))
 
+    trainable = params.get('trainable', True)
 
     with tf.variable_scope(scope, reuse=reuse):
         for i, dim in enumerate(dims):
@@ -194,7 +196,7 @@ def fcnn(
                 weights_initializer=tf.contrib.layers.xavier_initializer(dtype=dtype),
                 biases_initializer=tf.constant_initializer(0., dtype=dtype),
                 weights_regularizer=tf.contrib.layers.l2_regularizer(weight_regularizer_scale),
-                trainable=True)
+                trainable=trainable)
 
             if dropout is not None:
                 assert (type(dropout) is float and 0 < dropout and dropout <= 1.0)
@@ -250,10 +252,9 @@ def rnn(
             initial_state = tuple(tf.split(initial_state, num_cells, axis=1))
             num_units = initial_state[0].get_shape()[1].value
     elif params['cell_type'] == 'lstm':
-        if 'use_layer_norm' in cell_args and cell_args['use_layer_norm']:
-            cell_type = tf.contrib.rnn.LayerNormBasicLSTMCell
-        else:
-            cell_type = rnn_cell.DpLSTMCell
+        assert ('use_layer_norm' not in cell_args)
+
+        cell_type = rnn_cell.DpLSTMCell
         cell_args = dict([(k, v) for k, v in cell_args.items() if k != 'use_layer_norm'])
         if initial_state is not None:
             states = tf.split(initial_state, 2 * num_cells, axis=1)

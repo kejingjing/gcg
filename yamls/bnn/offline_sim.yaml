@@ -1,3 +1,4 @@
+exp_name: bnn/test
 log_level: debug
 
 ###############
@@ -5,10 +6,12 @@ log_level: debug
 ###############
 
 offline:
-  data: /home/gkahn/code/gcg/data/local/offline/sim_data  # TODO
-  data_holdout: /home/gkahn/code/gcg/data/local/offline/sim_data # TODO: fix
-  checkpoint: #/home/rmcallister/code/gcg/data/local/offline/do.ckpt # /home/rmcallister/code/gcg/sandbox/gkahn/gcg/rowan_100k_network.ckpt # TODO: or rowan_100k_network_inference.ckpt
-  checkpoint_bnn_preprocessing: #/home/rmcallister/code/gcg/sandbox/gkahn/gcg/bnn_preprocessing.ckpt
+  # all paths are relative to gcg/data
+  data: bnn/datasets/SquareClutteredEnv_random100
+  data_holdout: bnn/datasets/SquareClutteredHoldoutEnv_random100
+
+  init_checkpoint:
+  init_restore: ['image', 'observation', 'action', 'rnn', 'output'] # what parts of graph to restore? given as a list which may contain ['image', 'observation', 'action', 'rnn', 'output']
 
 #################
 ### Algorithm ###

@@ -3,23 +3,23 @@ import numpy as np
 class BnnPlotter(object):
 
     @staticmethod
-    def plot_dropout(outputs, rewards, num_sample=10):
+    def plot_dropout(preds, labels, num_sample=10):
         """
         outputs: num_dropout x sample_size x action_len-1
         rewards: sample_size x action_len
         :return:
         """
         import matplotlib.pyplot as plt
-        num_sample = min(num_sample, outputs.shape[1])
-        num_time = outputs.shape[2]
+        num_sample = min(num_sample, preds.shape[1])
+        num_time = preds.shape[2]
         i = 0
         for i_sample in range(num_sample):
             for i_time in range(num_time):
-                x = outputs[:, i_sample, i_time]
+                x = preds[:, i_sample, i_time]
                 i += 1
                 plt.subplot(num_sample,num_time,i)
-                color = 'b' if rewards[i_sample, i_time] == 0 else 'r'
-                plt.hist(x, 20, range=(-1.,0.), color=color)
+                color = 'b' if labels[i_sample, i_time] == 0 else 'r'
+                plt.hist(x, 20, range=(0.,1.), color=color)
                 if i_sample == 0:
                     plt.title("t = {}".format(i_time))
                 if i_time == 0:

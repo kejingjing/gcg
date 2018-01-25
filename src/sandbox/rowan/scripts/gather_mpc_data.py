@@ -56,11 +56,10 @@ class GatherMPCData(object):
 
             rollouts_i = []
             for action_sequence in self._action_sequences:
-                curr_obs = self._env.reset(start_pose[0], start_pose[1])
-                import IPython; IPython.embed()
+                curr_obs, curr_goals = self._env.reset(start_pose[0], start_pose[1])
                 for action in action_sequence:
                     self._replay_pool.store_observation(step, curr_obs)
-                    next_obs, reward, done, env_info = self._env.step(action)
+                    next_obs, goal, reward, done, env_info = self._env.step(action)
                     self._replay_pool.store_effect(action, reward, done, env_info, np.nan, np.nan)
                     step += 1
                     if done:

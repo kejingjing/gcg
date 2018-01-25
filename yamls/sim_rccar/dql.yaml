@@ -141,8 +141,8 @@ policy:
   grad_clip_norm: 10 # clip the gradient magnitude
 
   # device
-  gpu_device: 0
-  gpu_frac: 0.4
+  gpu_device: 1
+  gpu_frac: 0.3
  
   class: GCGPolicy # <GCGPolicy> model class
   GCGPolicy: &idGCGPolicy
