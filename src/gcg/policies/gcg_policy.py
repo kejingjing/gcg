@@ -1,8 +1,9 @@
-import os
+import os, itertools
 from collections import defaultdict
 from collections import OrderedDict
 import numpy as np
 import tensorflow as tf
+import tensorflow.contrib.layers as layers
 from sklearn.utils.extmath import cartesian
 
 from gcg.envs.spaces.discrete import Discrete
@@ -47,6 +48,12 @@ class GCGPolicy(object):
         self._action_graph = kwargs['action_graph']
         self._rnn_graph = kwargs['rnn_graph']
         self._output_graph = kwargs['output_graph']
+        ### scopes
+        self._image_scope = 'image_scope'
+        self._observation_scope = 'observation_scope'
+        self._action_scope = 'action_scope'
+        self._rnn_scope = 'rnn_scope'
+        self._output_scope = 'output_scope'
 
         ### target network
         self._use_target = kwargs['use_target']
@@ -164,8 +171,6 @@ class GCGPolicy(object):
                tf_obs_im_target_ph, tf_obs_vec_target_ph, tf_test_es_ph_dict, tf_episode_timesteps_ph
 
     def _graph_obs_to_lowd(self, tf_obs_im_ph, tf_obs_vec_ph, is_training):
-        import tensorflow.contrib.layers as layers
-
         with tf.name_scope('obs_to_lowd'):
             ### whiten observations
             # TODO: assumes image is an input
@@ -176,28 +181,27 @@ class GCGPolicy(object):
             tf_obs_im_whitened = (tf.cast(tf_obs_im_ph, tf.float32) - 128.) / 128.
 
             ### CNN
+            with tf.variable_scope(self._image_scope):
+                layer = tf.reshape(tf_obs_im_whitened, [-1, self._obs_history_len] + list(self._obs_im_shape))
+                # [batch_size, hist_len, height, width, channels]
 
-            layer = tf.reshape(tf_obs_im_whitened, [-1, self._obs_history_len] + list(self._obs_im_shape))
-            # [batch_size, hist_len, height, width, channels]
+                layer = tf.reshape(layer, [-1] + list(self._obs_im_shape))
+                # [batch_size * hist_len, height, width, channels]
 
-            layer = tf.reshape(layer, [-1] + list(self._obs_im_shape))
-            # [batch_size * hist_len, height, width, channels]
+                layer, _ = networks.convnn(layer, self._image_graph, is_training=is_training, global_step_tensor=self.global_step)
+                layer = layers.flatten(layer)
+                # pass through cnn to get [batch_size * hist_len, ??]
 
-            layer, _ = networks.convnn(layer, self._image_graph, is_training=is_training,
-                                       scope='obs_to_lowd_convnn', global_step_tensor=self.global_step)
-            layer = layers.flatten(layer)
-            # pass through cnn to get [batch_size * hist_len, ??]
-
-            layer = tf.reshape(layer, (-1, self._obs_history_len * layer.get_shape()[1].value))
-            # [batch_size, hist_len, ??]
+                layer = tf.reshape(layer, (-1, self._obs_history_len * layer.get_shape()[1].value))
+                # [batch_size, hist_len, ??]
 
             ### FCNN
 
-            if tf_obs_vec_ph.get_shape()[1].value > 0:
-                layer = tf.concat([layer, tf.reshape(tf_obs_vec_ph, [-1, self._obs_history_len * self._obs_vec_dim])], axis=1)
+            with tf.variable_scope(self._observation_scope):
+                if tf_obs_vec_ph.get_shape()[1].value > 0:
+                    layer = tf.concat([layer, tf.reshape(tf_obs_vec_ph, [-1, self._obs_history_len * self._obs_vec_dim])], axis=1)
 
-            tf_obs_lowd, _ = networks.fcnn(layer, self._observation_graph, is_training=is_training,
-                                           scope='obs_to_lowd_fcnn', global_step_tensor=self.global_step)
+                tf_obs_lowd, _ = networks.fcnn(layer, self._observation_graph, is_training=is_training, global_step_tensor=self.global_step)
 
         return tf_obs_lowd
 
@@ -213,25 +217,21 @@ class GCGPolicy(object):
         N = self._N if N is None else N
         # tf.assert_equal(tf.shape(tf_obs_lowd)[0], tf.shape(tf_actions_ph)[0])
 
-        self._action_graph.update({'output_dim': self._observation_graph['output_dim']})
-        actions = tf.reshape(tf_actions_ph, (-1, self._action_dim))
-        rnn_inputs, _ = networks.fcnn(actions, self._action_graph, is_training=is_training, scope='fcnn_actions',
-                                      T=H, global_step_tensor=self.global_step, num_dp=num_dp)
-        rnn_inputs = tf.reshape(rnn_inputs, (-1, H, self._action_graph['output_dim']))
+        with tf.variable_scope(self._action_scope):
+            self._action_graph.update({'output_dim': self._observation_graph['output_dim']})
+            rnn_inputs, _ = networks.fcnn(tf_actions_ph, self._action_graph, is_training=is_training,
+                                          T=H, global_step_tensor=self.global_step, num_dp=num_dp)
 
-        rnn_outputs, _ = networks.rnn(rnn_inputs, self._rnn_graph, initial_state=tf_obs_lowd, num_dp=num_dp)
-        rnn_output_dim = rnn_outputs.get_shape()[2].value
-        rnn_outputs = tf.reshape(rnn_outputs, (-1, rnn_output_dim))
+        with tf.variable_scope(self._rnn_scope):
+            rnn_outputs, _ = networks.rnn(rnn_inputs, self._rnn_graph, initial_state=tf_obs_lowd, num_dp=num_dp)
 
-        self._output_graph.update({'output_dim': self._output_dim})
-        # rewards
-        tf_pre_yhats, _ = networks.fcnn(rnn_outputs, self._output_graph, is_training=is_training, scope='fcnn_yhats',
-                                            T=H, global_step_tensor=self.global_step, num_dp=num_dp)
-        tf_pre_yhats = tf.reshape(tf_pre_yhats, (-1, H, self._output_dim))
-        # values
-        tf_pre_bhats, _ = networks.fcnn(rnn_outputs, self._output_graph, is_training=is_training, scope='fcnn_bhats',
-                                           T=H, global_step_tensor=self.global_step, num_dp=num_dp)
-        tf_pre_bhats = tf.reshape(tf_pre_bhats, (-1, H, self._output_dim))
+        with tf.variable_scope(self._output_scope):
+            self._output_graph.update({'output_dim': self._output_dim})
+            self._output_graph.update({'batch_size': batch_size})
+            tf_pre_yhats, _ = networks.fcnn(rnn_outputs, self._output_graph, is_training=is_training, scope='fcnn_yhats',
+                                                T=H, global_step_tensor=self.global_step, num_dp=num_dp)
+            tf_pre_bhats, _ = networks.fcnn(rnn_outputs, self._output_graph, is_training=is_training, scope='fcnn_bhats',
+                                               T=H, global_step_tensor=self.global_step, num_dp=num_dp)
 
         pre_yhats = OrderedDict()
         for i, key in enumerate(self._output_keys):
@@ -625,6 +625,33 @@ class GCGPolicy(object):
 
         return target_values, target_yhats, target_bhats, tf_target_vars, tf_update_target_fn
 
+    def _graph_setup_savers(self, tf_policy_vars, tf_nonpolicy_vars, tf_policy_opt_vars, tf_nonpolicy_opt_vars,
+                            inference_only):
+        savers_dict = dict()
+
+        savers_dict['inference'] = tf.train.Saver(tf_policy_vars + tf_nonpolicy_vars, max_to_keep=None)
+        if not inference_only:
+
+            def filter_policy_vars(must_contain):
+                return [v for v in tf_policy_vars + tf_policy_opt_vars if must_contain in v.name]
+
+            train_vars = dict()
+            train_vars['image'] = filter_policy_vars(self._image_scope)
+            train_vars['observation'] = filter_policy_vars(self._observation_scope)
+            train_vars['action'] = filter_policy_vars(self._action_scope)
+            train_vars['rnn']= filter_policy_vars(self._rnn_scope)
+            train_vars['output'] = filter_policy_vars(self._output_scope)
+            train_vars['other'] = tf_nonpolicy_vars + tf_nonpolicy_opt_vars
+
+            all_var_names = tuple(sorted([v.name for v in itertools.chain(*train_vars.values())]))
+            global_var_names = tuple(sorted([v.name for v in tf.global_variables()]))
+            assert (all_var_names == global_var_names)
+
+            for name, vars in train_vars.items():
+                savers_dict['train_{0}'.format(name)] = tf.train.Saver(vars, max_to_keep=None)
+
+        return savers_dict
+
     def _graph_setup(self):
         ### create session and graph
         tf_sess = tf.get_default_session()
@@ -657,10 +684,8 @@ class GCGPolicy(object):
                 self._graph_setup_action_selection(policy_scope, tf_obs_im_ph, tf_obs_vec_ph, inputs, goals, tf_episode_timesteps_ph, tf_test_es_ph_dict)
 
             ### get policy variables
-            tf_policy_vars = sorted(tf.get_collection(tf.GraphKeys.GLOBAL_VARIABLES,
-                                                      scope=policy_scope), key=lambda v: v.name)
-            tf_trainable_policy_vars = sorted(tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES,
-                                                                scope=policy_scope), key=lambda v: v.name)
+            tf_policy_vars = sorted(tf.get_collection(tf.GraphKeys.GLOBAL_VARIABLES, scope=policy_scope), key=lambda v: v.name)
+            tf_nonpolicy_vars = sorted([v for v in tf.global_variables() if v not in tf_policy_vars], key=lambda v: v.name)
 
             if not self._inference_only:
                 target_inputs = OrderedDict()
@@ -672,13 +697,19 @@ class GCGPolicy(object):
                 
                 ### optimization
                 tf_cost, tf_mse, tf_costs = self._graph_cost(values, yhats, bhats, tf_obs_vec_target_ph, tf_rewards_ph, tf_dones_ph, target_inputs, target_values, target_yhats, target_bhats) 
-                tf_opt, tf_lr_ph = self._graph_optimize(tf_cost, tf_trainable_policy_vars)
+                tf_opt, tf_lr_ph = self._graph_optimize(tf_cost, tf_policy_vars)
             else:
                 tf_target_vars = tf_update_target_fn = tf_cost = tf_mse = tf_opt = tf_lr_ph = None
 
+            ### get opt vars
+            tf_opt_vars = [v for v in tf.global_variables() if v not in tf_policy_vars + tf_nonpolicy_vars]
+            tf_policy_opt_vars = [v for v in tf_opt_vars if policy_scope in v.name]
+            tf_nonpolicy_opt_vars = [v for v in tf_opt_vars if policy_scope not in v.name]
+
             ### savers
-            tf_saver_inference = tf.train.Saver(tf_policy_vars, max_to_keep=None)
-            tf_saver_train = tf.train.Saver(max_to_keep=None) if not self._inference_only else None
+            tf_savers_dict = self._graph_setup_savers(tf_policy_vars, tf_nonpolicy_vars,
+                                                      tf_policy_opt_vars, tf_nonpolicy_opt_vars,
+                                                      self._inference_only)
 
             ### initialize
             self._graph_init_vars(tf_sess)
@@ -710,8 +741,7 @@ class GCGPolicy(object):
             'lr_ph': tf_lr_ph,
             'policy_vars': tf_policy_vars,
             'target_vars': tf_target_vars,
-            'saver_inference': tf_saver_inference,
-            'saver_train': tf_saver_train
+            'savers_dict': tf_savers_dict
         }
 
     ################
@@ -758,7 +788,6 @@ class GCGPolicy(object):
         self._log_stats['reg cost'].append(cost - mse)
         for i, output in enumerate(self._outputs):
             self._log_stats['{0} cost'.format(output['name'])].append(costs[i])
-
 
     def reset_weights(self):
         tf_sess = self._tf_dict['sess']
@@ -831,13 +860,30 @@ class GCGPolicy(object):
     ### Saving/loading ###
     ######################
 
-    def save(self, ckpt_name, train=True):
-        saver = self._tf_dict['saver_train'] if train else self._tf_dict['saver_inference']
-        saver.save(self._tf_dict['sess'], ckpt_name, write_meta_graph=False)
+    def _saver_ckpt_name(self, ckpt_name, saver_name):
+        name, ext = os.path.splitext(ckpt_name)
+        saver_ckpt_name = '{0}_{1}{2}'.format(name, saver_name, ext)
+        return saver_ckpt_name
 
-    def restore(self, ckpt_name, train=True):
-        saver = self._tf_dict['saver_train'] if train else self._tf_dict['saver_inference']
-        saver.restore(self._tf_dict['sess'], ckpt_name)
+    def save(self, ckpt_name, train=True):
+        if train:
+            savers_keys = [k for k in self._tf_dict['savers_dict'].keys() if 'inference' not in k]
+        else:
+            savers_keys = ['inference']
+
+        for saver_name in savers_keys:
+            saver = self._tf_dict['savers_dict'][saver_name]
+            saver.save(self._tf_dict['sess'], self._saver_ckpt_name(ckpt_name, saver_name), write_meta_graph=False)
+
+    def restore(self, ckpt_name, train=True, train_restore=('image', 'observation', 'action', 'rnn', 'output')):
+        if train:
+            savers_keys = ['train_{0}'.format(k) for k in train_restore] + ['other']
+        else:
+            savers_keys = ['inference']
+
+        for saver_name in savers_keys:
+            saver = self._tf_dict['savers_dict'][saver_name]
+            saver.restore(self._tf_dict['sess'], self._saver_ckpt_name(ckpt_name, saver_name))
 
     ###############
     ### Logging ###

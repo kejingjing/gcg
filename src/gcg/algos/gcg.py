@@ -288,17 +288,16 @@ def run_gcg(params):
     assert (os.path.exists(data_dir))
     save_dir = os.path.join(data_dir, params['exp_name'])
     os.makedirs(save_dir, exist_ok=True)
-    logger.setup(os.path.join(save_dir, 'log.txt'), params['log_level'])
+    logger.setup(display_name=params['exp_name'],
+                 log_path=os.path.join(save_dir, 'log.txt'),
+                 lvl=params['log_level'])
 
     # TODO: set seed
 
     # copy yaml for posterity
-    try:
-        yaml_path = os.path.join(save_dir, '{0}.yaml'.format(params['exp_name']))
-        with open(yaml_path, 'w') as f:
-            f.write(params['txt'])
-    except:
-        pass
+    yaml_path = os.path.join(save_dir, 'params.yaml'.format(params['exp_name']))
+    with open(yaml_path, 'w') as f:
+        f.write(params['txt'])
 
     os.environ["CUDA_VISIBLE_DEVICES"] = str(params['policy']['gpu_device'])  # TODO: hack so don't double GPU
 

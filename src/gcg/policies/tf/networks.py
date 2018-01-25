@@ -1,7 +1,9 @@
 import tensorflow as tf
 
 from gcg.policies.tf import rnn_cell
-from gcg.policies.tf.weight_norm import fully_connected_weight_norm, conv2d_weight_norm
+from gcg.policies.tf.bnn.concrete_dropout import ConcreteDropout
+from gcg.policies.tf.bnn.bayes_by_backprop import BayesByBackprop
+from gcg.policies.tf.bnn.probabilistic_backprop import PBP_net
 
 def convnn(
         inputs,
@@ -65,17 +67,6 @@ def convnn(
                     'scale': True,
                     'center': True
                 }
-            elif normalizer == 'weight_norm':
-                normalizer_fn = None
-                normalizer_params = None
-
-                if i == 0 and data_format != 'NHWC':
-                    if data_format == 'NCHW':
-                        next_layer_input = tf.transpose(next_layer_input, (0, 2, 3, 1))
-                    else:
-                        raise Exception('weight norm and data format, fix it')
-                    data_format = 'NHWC'
-
             elif normalizer is None:
                 normalizer_fn = None
                 normalizer_params = None
@@ -83,33 +74,20 @@ def convnn(
                 raise NotImplementedError(
                     'Normalizer {0} is not valid'.format(normalizer))
 
-            if normalizer == 'weight_norm':
-                next_layer_input = conv2d_weight_norm(
-                    inputs=next_layer_input,
-                    num_outputs=filters[i],
-                    data_format=data_format,
-                    kernel_size=kernels[i],
-                    stride=strides[i],
-                    padding=padding,
-                    activation_fn=activation,
-                    trainable=True,
-                    global_step_tensor=global_step_tensor
-                )
-            else:
-                next_layer_input = tf.contrib.layers.conv2d(
-                    inputs=next_layer_input,
-                    num_outputs=filters[i],
-                    data_format=data_format,
-                    kernel_size=kernels[i],
-                    stride=strides[i],
-                    padding=padding,
-                    activation_fn=activation,
-                    normalizer_fn=normalizer_fn,
-                    normalizer_params=normalizer_params,
-                    weights_initializer=tf.contrib.layers.xavier_initializer_conv2d(dtype=dtype),
-                    weights_regularizer=tf.contrib.layers.l2_regularizer(0.5),
-                    biases_initializer=tf.constant_initializer(0., dtype=dtype),
-                    trainable=True)
+            next_layer_input = tf.contrib.layers.conv2d(
+                inputs=next_layer_input,
+                num_outputs=filters[i],
+                data_format=data_format,
+                kernel_size=kernels[i],
+                stride=strides[i],
+                padding=padding,
+                activation_fn=activation,
+                normalizer_fn=normalizer_fn,
+                normalizer_params=normalizer_params,
+                weights_initializer=tf.contrib.layers.xavier_initializer_conv2d(dtype=dtype),
+                weights_regularizer=tf.contrib.layers.l2_regularizer(0.5),
+                biases_initializer=tf.constant_initializer(0., dtype=dtype),
+                trainable=True)
 
     output = next_layer_input
     # TODO
@@ -157,7 +135,11 @@ def fcnn(
     hidden_layers = params.get('hidden_layers', [])
     output_dim = params['output_dim']
     dropout = params.get('dropout', None)
+    bnn_method = params.get('bnn_method', None)
+    if bnn_method == 'concrete_dropout' and dropout is None:
+        dropout = 0.1  # rowan's overriding hack (note: specific value not used)
     normalizer = params.get('normalizer', None)
+    assert(normalizer is None)
     if dp_masks is not None or dropout is None:
         dp_return_masks = None
     else:
@@ -166,71 +148,53 @@ def fcnn(
 
     dims = hidden_layers + [output_dim]
 
-    next_layer_input = inputs
+    if T is None:
+        assert(len(inputs.get_shape()) == 2)
+        next_layer_input = inputs
+    else:
+        assert(len(inputs.get_shape()) == 3)
+        assert(inputs.get_shape()[1].value == T)
+        next_layer_input = tf.reshape(inputs, (-1, inputs.get_shape()[-1].value))
+
+
     with tf.variable_scope(scope, reuse=reuse):
         for i, dim in enumerate(dims):
             if i == len(dims) - 1:
                 activation = output_activation
             else:
                 activation = hidden_activation
-            if normalizer == 'batch_norm':
-                normalizer_fn = tf.contrib.layers.batch_norm
-                normalizer_params = {
-                    'is_training': is_training,
-                    'data_format': data_format,
-                    'fused': True,
-                    'decay': params.get('batch_norm_decay', 0.999),
-                    'zero_debias_moving_mean': True,
-                    'scale': True,
-                    'center': True,
-                    'updates_collections': None
-                }
-            elif normalizer == 'layer_norm':
-                normalizer_fn = tf.contrib.layers.layer_norm
-                normalizer_params = {
-                    'scale': True,
-                    'center': True
-                }
-            elif normalizer == 'weight_norm':
-                normalizer_fn = None
-                normalizer_params = None
-            elif normalizer is None:
-                normalizer_fn = None
-                normalizer_params = None
-            else:
-                raise NotImplementedError(
-                    'Normalizer {0} is not valid'.format(normalizer))
 
-            if normalizer == 'weight_norm':
-                next_layer_input = fully_connected_weight_norm(
-                    inputs=next_layer_input,
-                    num_outputs=dim,
-                    activation_fn=activation,
-                    trainable=True,
-                    global_step_tensor=global_step_tensor
-                )
-            elif T is None or normalizer != 'batch_norm':
-                next_layer_input = tf.contrib.layers.fully_connected(
-                    inputs=next_layer_input,
-                    num_outputs=dim,
-                    activation_fn=activation,
-                    normalizer_fn=normalizer_fn,
-                    normalizer_params=normalizer_params,
-                    weights_initializer=tf.contrib.layers.xavier_initializer(dtype=dtype),
-                    biases_initializer=tf.constant_initializer(0., dtype=dtype),
-                    weights_regularizer=tf.contrib.layers.l2_regularizer(0.5),
-                    trainable=True)
+            num_data = params.get('num_data', None)  # TODO: find a better solution than yaml file to get this value
+            batch_size = params.get('batch_size', None)  # TODO: find a better solution than yaml file to get this value
+            bnn_layer_name = "bnn_{}_{}".format(bnn_method, i)
+            if bnn_method == 'concrete_dropout':
+                input_dim = next_layer_input.get_shape()[1].value
+                concrete_dropout = ConcreteDropout(bnn_layer_name, num_data, input_dim)
+                fc_layer = tf.contrib.layers.fully_connected
+                weight_regularizer_scale = concrete_dropout.get_weight_regularizer_scale()
+            elif bnn_method == 'bayes_by_backprop':
+                bayes_by_backprop = BayesByBackprop(bnn_layer_name, num_data, batch_size)
+                # note: object is callable like a layer, but only assumes a one-time call per instance
+                fc_layer = bayes_by_backprop
+                weight_regularizer_scale = bayes_by_backprop.get_weight_regularizer_scale()
+            elif bnn_method == 'probabilistic_backprop':
+                probabilistic_backprop = PBP_net.PBP_net()  # TODO: can this handle being layer-wise?
+                fc_layer = probabilistic_backprop
+                weight_regularizer_scale = 0.0
             else:
-                fc_out = tf.contrib.layers.fully_connected(
-                    inputs=next_layer_input,
-                    num_outputs=dim,
-                    activation_fn=activation,
-                    weights_initializer=tf.contrib.layers.xavier_initializer(dtype=dtype),
-                    weights_regularizer=tf.contrib.layers.l2_regularizer(0.5),
-                    trainable=True)
-                fc_out_reshape = tf.reshape(fc_out, (-1, T * fc_out.get_shape()[1].value))
-                bn_out = tf.contrib.layers.batch_norm(fc_out_reshape, **normalizer_params)
-                next_layer_input = tf.reshape(bn_out, tf.shape(fc_out))
+                fc_layer = tf.contrib.layers.fully_connected
+                weight_regularizer_scale = 0.5
+
+            next_layer_input = fc_layer(
+                inputs=next_layer_input,
+                num_outputs=dim,
+                activation_fn=activation,
+                normalizer_fn=None,
+                normalizer_params=None,
+                weights_initializer=tf.contrib.layers.xavier_initializer(dtype=dtype),
+                biases_initializer=tf.constant_initializer(0., dtype=dtype),
+                weights_regularizer=tf.contrib.layers.l2_regularizer(weight_regularizer_scale),
+                trainable=True)
 
             if dropout is not None:
                 assert (type(dropout) is float and 0 < dropout and dropout <= 1.0)
@@ -245,13 +209,20 @@ def fcnn(
                     else:
                         sample = distribution.sample(shape)
                     sample = tf.reshape(sample, (-1, dim))
-                    mask = tf.cast(sample < dropout, dtype) / dropout
-                    next_layer_input = next_layer_input * mask
+                    if bnn_method == 'concrete_dropout':
+                        next_layer_input, mask = concrete_dropout.apply_soft_dropout_mask(next_layer_input, sample)
+                    else:
+                        mask = tf.cast(sample < dropout, dtype) / dropout
+                        next_layer_input = next_layer_input * mask
                     dp_return_masks.append(mask)
 
         output = next_layer_input
 
+        if T is not None:
+            output = tf.reshape(output, (-1, T, output.get_shape()[-1].value))
+
     return output, dp_return_masks
+
 
 
 def rnn(
