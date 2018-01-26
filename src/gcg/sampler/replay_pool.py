@@ -306,7 +306,44 @@ class ReplayPool(object):
         env_infos = np.vstack(env_infos)
 
         return steps, (observations_im, observations_vec), actions, rewards, dones, env_infos
-    
+
+    def sample_all_generator(self, batch_size, include_env_infos=False):
+        if not self.can_sample():
+            return
+
+        steps, observations_im, observations_vec, actions, rewards, dones, env_infos = [], [], [], [], [], [], []
+
+        for start_index in range(len(self) - self._N):
+            indices = self._get_indices(start_index, (start_index + self._N + 1) % self._curr_size)
+
+            steps_i = self._steps[indices]
+            obs_im_i, obs_vec_i = self._encode_observation(start_index)
+            observations_im_i = np.vstack([obs_im_i, self._observations_im[indices[1:]]])
+            observations_vec_i = np.vstack([obs_vec_i, self._observations_vec[indices[1:]]])
+            actions_i = self._actions[indices]
+            rewards_i = self._rewards[indices]
+            dones_i = self._dones[indices]
+            env_infos_i = self._env_infos[indices] if include_env_infos else [None] * len(dones_i)
+
+            if dones_i[0]:
+                continue
+
+            steps.append(np.expand_dims(steps_i, 0))
+            observations_im.append(np.expand_dims(observations_im_i, 0))
+            observations_vec.append(np.expand_dims(observations_vec_i, 0))
+            actions.append(np.expand_dims(actions_i, 0))
+            rewards.append(np.expand_dims(rewards_i, 0))
+            dones.append(np.expand_dims(dones_i, 0))
+            env_infos.append(np.expand_dims(env_infos_i, 0))
+
+            if len(steps) >= batch_size:
+                yield np.vstack(steps), (np.vstack(observations_im), np.vstack(observations_vec)),\
+                      np.vstack(actions), np.vstack(rewards), np.vstack(dones), np.vstack(env_infos)
+                steps, observations_im, observations_vec, actions, rewards, dones, env_infos = [], [], [], [], [], [], []
+
+        yield np.vstack(steps), (np.vstack(observations_im), np.vstack(observations_vec)), \
+              np.vstack(actions), np.vstack(rewards), np.vstack(dones), np.vstack(env_infos)
+
     @staticmethod
     def sample_pools(replay_pools, batch_size, include_env_infos=False, only_completed_episodes=False):
         """ Sample from replay pools (treating them as one big replay pool) """

@@ -2,6 +2,7 @@ import argparse
 import glob
 import os
 import yaml
+from collections import defaultdict
 
 import numpy as np
 
@@ -54,6 +55,8 @@ class EvalOffline(object):
                                 train_restore=self._params['offline']['init_restore'])
 
         self._restore_train_policy()
+
+        self._num_bnn_samples = self._params['offline'].get('num_bnn_samples', 100)
 
     #############
     ### Files ###
@@ -222,43 +225,38 @@ class EvalOffline(object):
         obs_vec_start_idxs = np.cumsum([space.flat_dim for space in vec_spec.values()]) - 1
         coll_idx = obs_vec_start_idxs[list(vec_spec.keys()).index('coll')]
 
-        ### sample from the data, get the outputs
-        sample_size = 200
-        steps, (observations_im, observations_vec), actions, rewards, dones, env_infos = \
-            replay_pool.sample(sample_size, include_env_infos=True)
-        observations = (observations_im[:, :self._model.obs_history_len, :],
-                        observations_vec[:, :self._model.obs_history_len, :])
-        labels = (np.cumsum(observations_vec[:, self._model.obs_history_len:, coll_idx], axis=1) >= 1.).astype(float)
+        # model will be evaluated on 1e3 inputs at a time (accounting for bnn samples)
+        batch_size = 1000 // self._num_bnn_samples
+        assert (batch_size > 1)
+        rp_gen = replay_pool.sample_all_generator(batch_size=batch_size, include_env_infos=True)
 
-        num_bnn_samples = 1000
-        preds = []
-        for _ in range(num_bnn_samples):
-            yhats, bhats = self._model.get_model_outputs(observations, actions)
-            preds.append(yhats['coll'])
-        preds = np.asarray(preds)
+        # keep everything in dict d
+        d = defaultdict(list)
+        for steps, (observations_im, observations_vec), actions, rewards, dones, env_infos in rp_gen:
+            observations = (observations_im[:, :self._model.obs_history_len, :],
+                            observations_vec[:, :self._model.obs_history_len, :])
+            coll_labels = (np.cumsum(observations_vec[:, self._model.obs_history_len:, coll_idx], axis=1) >= 1.).astype(float)
 
-        plotter(preds, labels)
+            observations_repeat = (np.repeat(observations[0], self._num_bnn_samples, axis=0),
+                                   np.repeat(observations[1], self._num_bnn_samples, axis=0))
+            actions_repeat = np.repeat(actions, self._num_bnn_samples, axis=0)
+
+            yhats, bhats = self._model.get_model_outputs(observations_repeat, actions_repeat)
+            coll_preds = np.reshape(yhats['coll'], (len(steps), self._num_bnn_samples, -1))
+
+            d['coll_labels'].append(coll_labels)
+            d['coll_preds'].append(coll_preds)
+            d['env_infos'].append(env_infos)
+            # Note: you can save more things (e.g. actions) if you want to do something with them later
+
+        for k, v in d.items():
+            d[k] = np.concatenate(v)
+
+        # d['coll_labels'] has shape (-1, horizon)
+        # d['coll_preds'] has shape (-1, self._num_bnn_samples, horizon)
+
+        # TODO: plot stuff
         # import IPython; IPython.embed()
-        # BnnPlotter.plot_dropout(outputs, rewards)
-        # BnnPlotter.plot_predtruth(outputs, rewards)
-        # BnnPlotter.plot_hist(outputs, rewards)
-        # BnnPlotter.plot_hist_no_time_structure(outputs, rewards)
-        # BnnPlotter.plot_roc(outputs, rewards)
-        # BnnPlotter.plot_scatter_prob_and_sigma(outputs, rewards)
-
-        # import pickle
-        # file_outputs = open("outputs.pkl", 'wb')
-        # file_rewards = open("rewards.pkl", 'wb')
-        # pickle.dump(outputs, file_outputs)
-        # pickle.dump(rewards, file_rewards)
-
-        # file_outputs = open("outputs.pkl", 'rb')
-        # file_outputs.seek(0)
-        # file_rewards = open("rewards.pkl", 'rb')
-        # file_rewards.seek(0)
-        # outputs = pickle.load(file_outputs)
-        # rewards = pickle.load(file_rewards)
-
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
