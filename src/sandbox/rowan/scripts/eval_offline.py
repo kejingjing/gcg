@@ -254,7 +254,7 @@ class EvalOffline(object):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument('yaml', type=str, help='yaml file with all parameters')
+    parser.add_argument('--yamls', nargs='+', help='yaml file with all parameters')
     parser.add_argument('--no_train', action='store_true', help='do not train model on data')
     parser.add_argument('--no_eval', action='store_true', help='do not evaluate model')
     args = parser.parse_args()
@@ -262,12 +262,18 @@ if __name__ == '__main__':
     curr_dir = os.path.realpath(os.path.dirname(__file__))
     yaml_dir = os.path.join(curr_dir[:curr_dir.find('gcg/src')], 'gcg/yamls')
     assert (os.path.exists(yaml_dir))
-    yaml_path = os.path.join(yaml_dir, args.yaml)
+    yaml_paths = [os.path.join(yaml_dir, y) for y in args.yamls]
 
-    model = EvalOffline(yaml_path)
-    if not args.no_train:
-        model.train()
+    for yaml_path in yaml_paths:
+        if not os.path.exists(yaml_path):
+            print('{0} does not exist'.format(yaml_path))
+            raise Exception
+        
+    for yaml_path in yaml_paths:
+        model = EvalOffline(yaml_path)
+        if not args.no_train:
+            model.train()
 
-    if not args.no_eval:
-        model.evaluate(BnnPlotter.plot_dropout, eval_on_holdout=False)
-        model.evaluate(BnnPlotter.plot_dropout, eval_on_holdout=True)
+        if not args.no_eval:
+            model.evaluate(BnnPlotter.plot_dropout, eval_on_holdout=False)
+            model.evaluate(BnnPlotter.plot_dropout, eval_on_holdout=True)
