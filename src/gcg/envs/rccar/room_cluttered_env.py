@@ -9,7 +9,8 @@ from gcg.envs.spaces.box import Box
 class RoomClutteredEnv(SquareEnv):
     def __init__(self, params={}):
         #TODO
-        self._goal_heading = np.array([0.])
+        self._goal_speed = 0.
+        self._goal_heading = 0.
         self._base_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'models')
         params.setdefault('model_path', os.path.join(self._base_dir, 'room.egg'))
         params.setdefault('obj_paths', ['bookcase.egg', 'chair.egg', 'coffee_table.egg', 'desk.egg', 'stool.egg', 'table.egg'])
@@ -20,7 +21,8 @@ class RoomClutteredEnv(SquareEnv):
 
     def _setup_spec(self):
         SquareEnv._setup_spec(self)
-        self.goal_spec['heading'] = Box(low=0, high=2 * 3.14) 
+        self.goal_spec['speed'] = Box(low=-4.0, high=4.0)
+        self.goal_spec['heading'] = Box(low=0, high=2 * 3.14)
 
     def _default_pos(self):
         return (20.0, -20., 0.3)
@@ -41,14 +43,17 @@ class RoomClutteredEnv(SquareEnv):
         self._setup_collision_object(self._model_path)
 
     def _get_goal(self):
-        goal = np.array(self._goal_heading)
+        goal = np.array([self._goal_speed, self._goal_heading])
         return goal
 
     def _get_reward(self):
         if self._collision:
             reward = self._collision_reward
         else:
-            reward = (np.cos(self._goal_heading[0] - self._get_heading()) + 1.) / 2.
+#            heading_reward = (np.cos(self._goal_heading[0] - self._get_heading()) + 1.) / 2.
+            heading_reward = np.cos(self._goal_heading - self._get_heading())
+            speed_reward = - (((self._goal_speed - self._get_speed()) / self._goal_speed) ** 2)
+            reward = heading_reward + speed_reward
         assert(reward <= self.max_reward)
         return reward
 
@@ -92,7 +97,7 @@ class RoomClutteredEnv(SquareEnv):
         else:
             pos, hpr, goal = self._next_restart_pos_hpr_goal()
             self._place_vehicle(pos=pos, hpr=hpr)
-            self._goal_heading = np.array([goal])
+            self._goal_heading = goal
         self._collision = False
         return self._get_observation(), self._get_goal()
 
@@ -102,6 +107,7 @@ class RoomClutteredEnv(SquareEnv):
         info['hpr'] = np.array(self._vehicle_pointer.getHpr())
         info['vel'] = self._get_speed()
         info['goal_h'] =  self._goal_heading
+        info['goal_s'] = self._goal_speed
         info['coll'] = self._collision
         info['reward'] = self._get_reward() 
         info['obstacles'] = self._obstacles
