@@ -47,6 +47,12 @@ class EvalOffline(object):
             logger.info('Loading bnn checkpoint')
             self._model.restore_bnn_preprocessing(self._params['offline']['checkpoint_bnn_preprocessing'])
 
+    def save(self, ckpt_name="/home/rmcallister/code/gcg/sandbox/gkahn/gcg/boostrap", train=True):
+        if self._bootstrap_index is not None:
+            ckpt_name += str(self._bootstrap_index)
+        ckpt_name += ".ckpt"
+        self._model.save(ckpt_name, train)
+
     ###################
     ### Environment ###
     ###################
@@ -196,16 +202,17 @@ class EvalOffline(object):
         rewards = EvalOffline.clean_rewards(rewards)
         observations = observations[:, :main_model._model.obs_history_len, :]
 
-        outputs = []
-        if bootstrapping:
-            for model in all_models:
-                outputs.append(model._model.get_model_outputs(observations, actions))
-        else:
-            model = all_models[0]
-            num_bnn_samples = 1000
-            for _ in range(num_bnn_samples):
-                outputs.append(model._model.get_model_outputs(observations, actions))
-        outputs = np.asarray(outputs)  # num_bnn_samples x sample_size x action_len
+        with all_models[0]._model.session.as_default(), all_models[0]._model.session.graph.as_default():
+            outputs = []
+            if bootstrapping:
+                for model in all_models:
+                    outputs.append(model._model.get_model_outputs(observations, actions))
+            else:
+                model = all_models[0]
+                num_bnn_samples = 100
+                for _ in range(num_bnn_samples):
+                    outputs.append(model._model.get_model_outputs(observations, actions))
+            outputs = np.asarray(outputs)  # num_bnn_samples x sample_size x action_len
 
         plotter(outputs, rewards)
         # import IPython; IPython.embed()

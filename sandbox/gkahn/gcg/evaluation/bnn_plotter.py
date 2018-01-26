@@ -3,7 +3,7 @@ import numpy as np
 class BnnPlotter(object):
 
     @staticmethod
-    def plot_dropout(outputs, rewards, num_sample=10):
+    def plot_pred_timeseries(outputs, rewards, num_sample=10):
         """
         outputs: num_dropout x sample_size x action_len-1
         rewards: sample_size x action_len
@@ -50,6 +50,24 @@ class BnnPlotter(object):
         cumulative_truth = np.cumsum(truth) / len(truth)
 
         plt.plot(pred, cumulative_truth)
+        plt.show(block=False)
+
+    @staticmethod
+    def plot_scatter_time_to_collision(outputs, rewards):
+        """
+        outputs: num_dropout x sample_size x action_len-1
+        rewards: sample_size x action_len
+        :return:
+        """
+        import matplotlib.pyplot as plt
+        truth = rewards.shape[1] + np.sum(rewards, axis=1)  # sample_size
+        pred_mu = outputs.shape[2] + np.sum(np.mean(outputs, axis=0), axis=1)  # sample_size
+        pred_sigma = np.sqrt(np.sum(np.var(outputs, axis=0), axis=1))  # sample_size
+        pred_mu_minus_truth = pred_mu - truth
+        plt.scatter(pred_mu_minus_truth, pred_sigma, alpha=0.5)
+        plt.title("Prediction minus truth of time steps until collision")
+        plt.xlabel("Expectation")
+        plt.ylabel("Standard deviation")
         plt.show(block=False)
 
     @staticmethod

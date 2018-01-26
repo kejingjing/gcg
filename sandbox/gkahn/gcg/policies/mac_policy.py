@@ -774,6 +774,13 @@ class MACPolicy(Parameterized, Serializable):
     #####################
 
     def get_model_outputs(self, observations, actions):
+        # import IPython; IPython.embed()
+
+        # d = {v.name: v for v in tf.global_variables()}
+        # assigner0 = tf.assign(d["policy/fcnn_values/bnn_concrete_dropout_0_logit:0"], 1000.0)
+        # assigner1 = tf.assign(d["policy/fcnn_values/bnn_concrete_dropout_1_logit:0"], 1000.0)
+        # self._tf_dict['sess'].run(assigner0)
+        # self._tf_dict['sess'].run(assigner1)
         feed_dict = {
             self._tf_dict['obs_ph']: observations,
             self._tf_dict['actions_ph']: actions
