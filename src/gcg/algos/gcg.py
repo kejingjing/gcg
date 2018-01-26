@@ -241,18 +241,24 @@ class GCG(object):
                 if self._train_every_n_steps >= 1:
                     if step % int(self._train_every_n_steps) == 0:
                         timeit.start('batch')
-                        batch = self._sampler.sample(self._batch_size)
+                        steps, observations, actions, rewards, dones, _ = \
+                            self._sampler.sample(self._batch_size)
                         timeit.stop('batch')
                         timeit.start('train')
-                        self._policy.train_step(step, *batch, use_target=target_updated)
+                        self._policy.train_step(step, steps=steps, observations=observations,
+                                                actions=actions, rewards=rewards, dones=dones,
+                                                use_target=target_updated)
                         timeit.stop('train')
                 else:
                     for _ in range(int(1. / self._train_every_n_steps)):
                         timeit.start('batch')
-                        batch = self._sampler.sample(self._batch_size)
+                        steps, observations, actions, rewards, dones, _ = \
+                            self._sampler.sample(self._batch_size)
                         timeit.stop('batch')
                         timeit.start('train')
-                        self._policy.train_step(step, *batch, use_target=target_updated)
+                        self._policy.train_step(step, steps=steps, observations=observations,
+                                                actions=actions, rewards=rewards, dones=dones,
+                                                use_target=target_updated)
                         timeit.stop('train')
 
                 ### update target network

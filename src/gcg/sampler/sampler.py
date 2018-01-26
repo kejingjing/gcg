@@ -49,14 +49,6 @@ class Sampler(object):
     def n_envs(self):
         return self._n_envs
 
-    ##################
-    ### Statistics ###
-    ##################
-
-    @property
-    def statistics(self):
-        return ReplayPool.statistics_pools(self._replay_pools)
-
     def __len__(self):
         return sum([len(rp) for rp in self._replay_pools])
 
@@ -78,18 +70,9 @@ class Sampler(object):
         ### get actions
         if take_random_actions:
             actions = [self._vec_env.action_space.sample() for _ in range(self._n_envs)]
-            est_values = [np.nan] * self._n_envs
-            if isinstance(self._vec_env.action_space, Discrete):
-                logprobs = [-np.log(self._vec_env.action_space.flat_dim)] * self._n_envs
-            elif isinstance(self._vec_env.action_space, Box):
-                low = self._vec_env.action_space.low
-                high = self._vec_env.action_space.high
-                logprobs = [-np.sum(np.log(high - low))] * self._n_envs
-            else:
-                raise NotImplementedError
             action_infos = [{} for _ in range(self._n_envs)]
         else:
-            actions, est_values, logprobs, action_infos = self._policy.get_actions(
+            actions, _, action_infos = self._policy.get_actions(
                 steps=list(range(step, step + self._n_envs)),
                 current_episode_steps=self._vec_env.current_episode_steps,
                 observations=(encoded_observations_im, encoded_observations_vec),
@@ -105,9 +88,9 @@ class Sampler(object):
             self._policy.reset_get_action()
 
         ### add to replay pool
-        for replay_pool, action, reward, done, env_info, est_value, logprob in \
-                zip(self._replay_pools, actions, rewards, dones, env_infos, est_values, logprobs):
-            replay_pool.store_effect(action, reward, done, env_info, est_value, logprob)
+        for replay_pool, action, reward, done, env_info,  in \
+                zip(self._replay_pools, actions, rewards, dones, env_infos):
+            replay_pool.store_effect(action, reward, done, env_info)
 
         self._curr_observations = next_observations
         self._curr_goals = goals 
@@ -142,7 +125,7 @@ class Sampler(object):
                 r_len = len(rollout['dones'])
                 if max_to_add is not None and step + r_len >= max_to_add:
                     diff = max_to_add - step
-                    for k in ('observations', 'actions', 'rewards', 'dones', 'logprobs'):
+                    for k in ('observations', 'actions', 'rewards', 'dones'):
                         rollout[k] = rollout[k][:diff]
                     done_adding = True
                     r_len = len(rollout['dones'])

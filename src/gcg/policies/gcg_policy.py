@@ -742,7 +742,7 @@ class GCGPolicy(object):
         if self._use_target and self._separate_target_params and self._tf_dict['update_target_fn']:
             self._tf_dict['sess'].run(self._tf_dict['update_target_fn'])
 
-    def train_step(self, step, steps, observations, actions, rewards, values, dones, logprobs, use_target):
+    def train_step(self, step, steps, observations, actions, rewards, dones, use_target):
         """
         :param steps: [batch_size, N+1]
         :param observations_im: [batch_size, N+1 + obs_history_len-1, obs_im_dim]
@@ -818,12 +818,10 @@ class GCGPolicy(object):
                                                          self._tf_dict['get_action_value']],
                                                         feed_dict=feed_dict)
 
-        logprobs = [np.nan] * len(steps)
-
         if isinstance(self._env_spec.action_space, Discrete):
             actions = [int(a.argmax()) for a in actions]
 
-        return actions, values, logprobs, ds
+        return actions, values, ds
     
     def reset_get_action(self):
         self._tf_dict['sess'].run(self._tf_dict['get_action_reset_ops'])

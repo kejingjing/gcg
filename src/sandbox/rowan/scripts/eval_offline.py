@@ -153,7 +153,7 @@ class EvalOffline(object):
             sampling_method='uniform',
             save_rollouts=False,
             save_rollouts_observations=False,
-            save_env_infos=False,
+            save_env_infos=True,
             replay_pool_params={}
         )
 
@@ -181,8 +181,10 @@ class EvalOffline(object):
 
         save_itr = 0
         for step in range(total_steps):
-            batch = self._replay_pool.sample(batch_size)
-            self._model.train_step(step, *batch, use_target=True)
+            steps, observations, actions, rewards, dones, _ = self._replay_pool.sample(batch_size)
+            self._model.train_step(step, steps=steps, observations=observations,
+                                   actions=actions, rewards=rewards, dones=dones,
+                                   use_target=True)
 
             ### update target network
             if step > update_target_after_n_steps and step % update_target_every_n_steps == 0:
@@ -222,7 +224,8 @@ class EvalOffline(object):
 
         ### sample from the data, get the outputs
         sample_size = 200
-        steps, (observations_im, observations_vec), actions, rewards, values, dones, logprobs = replay_pool.sample(sample_size)
+        steps, (observations_im, observations_vec), actions, rewards, dones, env_infos = \
+            replay_pool.sample(sample_size, include_env_infos=True)
         observations = (observations_im[:, :self._model.obs_history_len, :],
                         observations_vec[:, :self._model.obs_history_len, :])
         labels = (np.cumsum(observations_vec[:, self._model.obs_history_len:, coll_idx], axis=1) >= 1.).astype(float)
