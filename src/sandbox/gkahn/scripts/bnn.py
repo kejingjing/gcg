@@ -13,8 +13,6 @@ from gcg.sampler.replay_pool import ReplayPool
 
 from gcg.policies.gcg_policy import GCGPolicy
 
-from bnn_plotter import BnnPlotter
-
 class EvalOffline(object):
     def __init__(self, yaml_path):
         with open(yaml_path, 'r') as f:
@@ -281,5 +279,5 @@ if __name__ == '__main__':
             model.train()
 
         if not args.no_eval:
-            model.evaluate(BnnPlotter.plot_dropout, eval_on_holdout=False)
-            model.evaluate(BnnPlotter.plot_dropout, eval_on_holdout=True)
+            model.evaluate(None, eval_on_holdout=False)
+            model.evaluate(None, eval_on_holdout=True)
