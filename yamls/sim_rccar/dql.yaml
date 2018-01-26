@@ -1,4 +1,4 @@
-exp_name: sim_rccar/forest_speed_dql_new_rew
+exp_name: sim_rccar/forest_speed_dql
 seed: 0
 log_level: debug
 
@@ -101,6 +101,7 @@ policy:
     conv_activation: relu # <relu>
     output_activation: relu # <relu/tanh/sigmoid/softmax>
     normalizer: # <layer_norm/weight_norm/batch_norm>
+
     batch_norm_decay: 0.9
 
   observation_graph: # fully connected

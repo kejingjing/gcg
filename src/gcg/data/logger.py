@@ -1,8 +1,13 @@
 import os, csv
+from collections import defaultdict
 import logging
 from colorlog import ColoredFormatter
 
-from gcg.data.tabulate import tabulate
+import pandas
+import numpy as np
+
+from .tabulate import tabulate
+
 
 class LoggerClass(object):
     GLOBAL_LOGGER_NAME = '_global_logger'
@@ -27,24 +32,30 @@ class LoggerClass(object):
         datefmt='%m-%d %H:%M:%S',
         style='%'
     )
-    
+
     def __init__(self):
+        self._dir = None
         self._logger = None
         self._log_path = None
         self._csv_path = None
         self._tabular = list()
-        
+
+    @property
+    def dir(self):
+        return self._dir
+
     #############
     ### Setup ###
     #############
-        
-    def setup(self, log_path, lvl):
-        display_name = os.path.dirname(log_path).split('/')[-1]
+
+    def setup(self, display_name, log_path, lvl):
+        self._dir = os.path.dirname(log_path)
         self._logger = self._get_logger(LoggerClass.GLOBAL_LOGGER_NAME,
                                         log_path,
                                         lvl=lvl,
                                         display_name=display_name)
         self._csv_path = os.path.splitext(log_path)[0] + '.csv'
+        self._tabular_keys = None
 
     def _get_logger(self, name, log_path, lvl=logging.INFO, display_name=None):
         if isinstance(lvl, str):
@@ -107,26 +118,43 @@ class LoggerClass(object):
 
     def record_tabular(self, key, val):
         for k, v in self._tabular:
-            assert(str(key) != k)
+            assert (str(key) != k)
         self._tabular.append((str(key), str(val)))
 
     def dump_tabular(self, print_func=None):
         if len(self._tabular) == 0:
             return ''
 
-        log_str = tabulate(self._tabular)
-
         ### print
         if print_func is not None:
+            log_str = tabulate(self._tabular)
             for line in log_str.split('\n'):
                 print_func(line)
 
         ### csv
-        mode = 'a' if os.path.exists(self._csv_path) else 'w'
+        tabular_dict = defaultdict(lambda: np.nan)
+        tabular_dict.update(dict(self._tabular))
+        keys_sorted = tuple(sorted(tabular_dict.keys()))
+
+        if os.path.exists(self._csv_path):
+            mode = 'a'
+            if self._tabular_keys is None:
+                self._tabular_keys = tuple(sorted(list(pandas.read_csv(self._csv_path).keys())))
+        else:
+            mode = 'w'
+            self._tabular_keys = keys_sorted
+
         with open(self._csv_path, mode) as f:
             writer = csv.writer(f)
-            writer.writerow(dict(self._tabular))
+            if mode == 'w':
+                writer.writerow(self._tabular_keys)
+            else:
+                for k in keys_sorted:
+                    assert (k in self._tabular_keys)
+                assert (keys_sorted == self._tabular_keys)
+            writer.writerow([tabular_dict[k] for k in self._tabular_keys])
 
         self._tabular = list()
+
 
 logger = LoggerClass()

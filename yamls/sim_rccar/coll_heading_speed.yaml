@@ -1,4 +1,4 @@
-exp_name: sim_rccar/forest_coll_heading_speed # _closer_reward
+exp_name: sim_rccar/forest_coll_heading_speed
 seed: 0
 log_level: debug
 
