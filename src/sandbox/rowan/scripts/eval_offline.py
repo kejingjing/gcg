@@ -18,6 +18,12 @@ class EvalOffline(object):
     def __init__(self, yaml_path):
         with open(yaml_path, 'r') as f:
             self._params = yaml.load(f)
+        # write yaml to save dir
+        with open(yaml_path, 'r') as f:
+            params_txt = ''.join(f.readlines())
+        params_path = os.path.join(self._save_dir, 'params.yaml')
+        with open(params_path, 'w') as f:
+            f.write(params_txt)
 
         logger.setup(display_name=self._params['exp_name'],
                      log_path=os.path.join(self._save_dir, 'log.txt'),
@@ -40,7 +46,6 @@ class EvalOffline(object):
         self._replay_holdout_pool = self._load_data(self._data_holdout_file_name)
         logger.info('Size of holdout replay pool: {0:d}'.format(len(self._replay_holdout_pool)))
 
-        # TODO: load specific parts
         if self._init_checkpoint_file_name is not None:
             logger.info('')
             logger.info('Loading checkpoint {0} for {1}'.format(self._init_checkpoint_file_name,
