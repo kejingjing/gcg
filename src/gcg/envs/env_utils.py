@@ -1,7 +1,8 @@
 try:
     from gcg.envs.sim_rccar.square_env import SquareEnv
     from gcg.envs.sim_rccar.square_cluttered_env import SquareClutteredEnv
-    from gcg.envs.sim_rccar.square_cluttered_holdout_env import SquareClutteredHoldoutEnv
+    from gcg.envs.sim_rccar.square_cluttered_colored_env import SquareClutteredColoredEnv
+    from gcg.envs.sim_rccar.square_cluttered_cone_env import SquareClutteredConeEnv
     from gcg.envs.sim_rccar.cylinder_env import CylinderEnv
     from gcg.envs.sim_rccar.room_cluttered_env import RoomClutteredEnv
     from gcg.envs.sim_rccar.simple_room_cluttered_env import SimpleRoomClutteredEnv

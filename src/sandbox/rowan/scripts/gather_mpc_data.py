@@ -82,7 +82,9 @@ class GatherMPCData(object):
         
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument('env', type=str, choices=('SquareClutteredEnv', 'SquareClutteredHoldoutEnv',))
+    parser.add_argument('env', type=str, choices=('SquareClutteredEnv',
+                                                  'SquareClutteredHoldoutEnv',
+                                                  'SquareClutteredConeEnv'))
     parser.add_argument('steps', type=int)
     parser.add_argument('-H', type=int)
     parser.add_argument('-K', type=int)
@@ -92,8 +94,10 @@ if __name__ == '__main__':
 
     if args.env == 'SquareClutteredEnv':
         env = create_env("SquareClutteredEnv(params={'hfov': 120, 'do_back_up': True, 'collision_reward_only': True, 'collision_reward': -1, 'speed_limits': [2., 2.]})")
-    elif args.env == 'SquareClutteredHoldoutEnv':
-        env = create_env("SquareClutteredHoldoutEnv(params={'hfov': 120, 'do_back_up': True, 'collision_reward_only': True, 'collision_reward': -1, 'speed_limits': [2., 2.]})")
+    elif args.env == 'SquareClutteredColoredEnv':
+        env = create_env("SquareClutteredColoredEnv(params={'hfov': 120, 'do_back_up': True, 'collision_reward_only': True, 'collision_reward': -1, 'speed_limits': [2., 2.]})")
+    elif args.env == 'SquareClutteredConeEnv':
+        env = create_env("SquareClutteredConeEnv(params={'hfov': 120, 'do_back_up': False, 'collision_reward_only': True, 'collision_reward': -1, 'speed_limits': [2., 2.]})")
     else:
         raise NotImplementedError
 

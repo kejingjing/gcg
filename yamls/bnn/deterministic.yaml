@@ -1,4 +1,4 @@
-exp_name: bnn/test
+exp_name: bnn/deterministic
 log_level: debug
 
 ###############
@@ -7,8 +7,8 @@ log_level: debug
 
 offline:
   # all paths are relative to gcg/data
-  data: bnn/datasets/SquareClutteredEnv_random100
-  data_holdout: bnn/datasets/SquareClutteredHoldoutEnv_random100
+  data: bnn/datasets/SquareClutteredEnv_random30000
+  data_holdout: bnn/datasets/SquareClutteredConeEnv_random5000
 
   init_checkpoint:
   init_restore: ['image', 'observation', 'action', 'rnn', 'output'] # what parts of graph to restore? given as a list which may contain ['image', 'observation', 'action', 'rnn', 'output']
@@ -26,12 +26,12 @@ alg:
 
   ### Steps ###
 
-  total_steps: 5.e+4
+  total_steps: 2.5e+5
 
   update_target_after_n_steps: 5.e+3 # after which the target network can be updated
   update_target_every_n_steps: 5.e+3 # how often to update target network
 
-  save_every_n_steps: 1.e+3
+  save_every_n_steps: 1.e+4
   log_every_n_steps: 1.e+3
 
   batch_size: 32
@@ -94,7 +94,7 @@ policy:
     num_cells: 1
     cell_type: mulint_lstm # <rnn/mulint_rnn/lstm/mulint_lstm>
     cell_args: # If you need to pass variables to cells
-      use_layer_norm: False
+        {}
 
   output_graph: # fully connected
     hidden_layers: [16]
@@ -138,4 +138,4 @@ policy:
         # rewards, goals, target_inputs, target_yhats, target_bhats, target_values, h
         bhat_label: 'None'
         bhat_loss: 'None'
-        clip_with_done: True
+        clip_with_done: False
