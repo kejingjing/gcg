@@ -252,11 +252,12 @@ class EvalOffline(object):
         for k, v in d.items():
             d[k] = np.concatenate(v)
 
-        # d['coll_labels'] has shape (-1, horizon)
-        # d['coll_preds'] has shape (-1, self._num_bnn_samples, horizon)
+        # d['coll_preds'] has shape (num_replays, self._num_bnn_samples, horizon)
+        # d['coll_labels'] has shape (num_replays, horizon)
         plotter = BnnPlotter(d['coll_preds'], d['coll_labels'])
         plotter.save_all_plots(self._save_dir)
-        # import IPython; IPython.embed()
+        import IPython; IPython.embed()
+        # TODO: look at d['env_infos'] dict of position etc, then use self._env.positions cone locations, then plot.
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
