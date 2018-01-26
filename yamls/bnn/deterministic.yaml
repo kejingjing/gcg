@@ -8,7 +8,7 @@ log_level: debug
 offline:
   # all paths are relative to gcg/data
   data: bnn/datasets/SquareClutteredEnv_random30000
-  data_holdout: bnn/datasets/SquareClutteredConeEnv_random5000
+  data_holdout: bnn/datasets/SquareClutteredConeEnv_random30000
 
   init_checkpoint:
   init_restore: ['image', 'observation', 'action', 'rnn', 'output'] # what parts of graph to restore? given as a list which may contain ['image', 'observation', 'action', 'rnn', 'output']

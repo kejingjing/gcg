@@ -209,7 +209,7 @@ class EvalOffline(object):
     ### Evaluate ###
     ################
 
-    def evaluate(self, plotter, eval_on_holdout=False):
+    def evaluate(self, eval_on_holdout=False):
         logger.info('Evaluating model')
 
         if eval_on_holdout:
@@ -237,27 +237,9 @@ class EvalOffline(object):
             preds.append(yhats['coll'])
         preds = np.asarray(preds)
 
-        plotter(preds, labels)
+        plotter = BnnPlotter(preds, labels)
         # import IPython; IPython.embed()
-        # BnnPlotter.plot_dropout(outputs, rewards)
-        # BnnPlotter.plot_predtruth(outputs, rewards)
-        # BnnPlotter.plot_hist(outputs, rewards)
-        # BnnPlotter.plot_hist_no_time_structure(outputs, rewards)
-        # BnnPlotter.plot_roc(outputs, rewards)
-        # BnnPlotter.plot_scatter_prob_and_sigma(outputs, rewards)
-
-        # import pickle
-        # file_outputs = open("outputs.pkl", 'wb')
-        # file_rewards = open("rewards.pkl", 'wb')
-        # pickle.dump(outputs, file_outputs)
-        # pickle.dump(rewards, file_rewards)
-
-        # file_outputs = open("outputs.pkl", 'rb')
-        # file_outputs.seek(0)
-        # file_rewards = open("rewards.pkl", 'rb')
-        # file_rewards.seek(0)
-        # outputs = pickle.load(file_outputs)
-        # rewards = pickle.load(file_rewards)
+        plotter.save_all_plots(self._save_dir)
 
 
 if __name__ == '__main__':
@@ -283,5 +265,5 @@ if __name__ == '__main__':
             model.train()
 
         if not args.no_eval:
-            model.evaluate(BnnPlotter.plot_dropout, eval_on_holdout=False)
-            model.evaluate(BnnPlotter.plot_dropout, eval_on_holdout=True)
+            model.evaluate(eval_on_holdout=False)
+            model.evaluate(eval_on_holdout=True)

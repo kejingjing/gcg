@@ -28,7 +28,6 @@ class ConcreteDropout(object):
 
         init_keep_prob_logit = tf.get_variable(layer_name + "_logit", initializer=tf.constant(0.))
         self.keep_prob = tf.sigmoid(init_keep_prob_logit)  # map TF variable back to [0,1]
-        # self.eps = 1e-7
 
         self._set_dropout_regulariser()
 
@@ -48,8 +47,8 @@ class ConcreteDropout(object):
 
     @staticmethod
     def _logit(x):
-        # TODO: include eps for numerical stability?
-        return tf.log(x) - tf.log(1. - x)
+        eps = 1e-7  # included for numerical stability
+        return tf.log(x + eps) - tf.log(1. - x + eps)
 
     def _set_dropout_regulariser(self):
         dropout_regularizer = self._dropout_regulariser_cross_entropy(self.num_training_data)
