@@ -41,15 +41,28 @@ class GatherRandomData(object):
                             save_rollouts_observations=True,
                             save_env_infos=True)
 
+    def _itr_save_file(self, itr):
+        path, ext = os.path.splitext(self._save_file)
+        return '{0}_{1:02d}{2}'.format(path, itr, ext)
+
     def run(self):
+        rollouts = []
+        itr = 0
+
         self._sampler.reset()
         step = 0
         while step < self._steps:
             self._sampler.step(step, take_random_actions=True)
             step += 1
 
-        rollouts = self._sampler.get_recent_paths()
-        mypickle.dump({'rollouts': rollouts}, self._save_file)
+            rollouts += self._sampler.get_recent_paths()
+            if step > 0 and step % 5000 == 0 and len(rollouts) > 0:
+                mypickle.dump({'rollouts': rollouts}, self._itr_save_file(itr))
+                rollouts = []
+                itr += 1
+
+        if len(rollouts) > 0:
+            mypickle.dump({'rollouts': rollouts}, self._itr_save_file(itr))
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
