@@ -13,8 +13,6 @@ from gcg.sampler.replay_pool import ReplayPool
 
 from gcg.policies.gcg_policy import GCGPolicy
 
-from bnn_plotter import BnnPlotter
-
 class EvalOffline(object):
     def __init__(self, yaml_path):
         with open(yaml_path, 'r') as f:
@@ -212,7 +210,7 @@ class EvalOffline(object):
     ### Evaluate ###
     ################
 
-    def evaluate(self, eval_on_holdout=False):
+    def evaluate(self, plotter, eval_on_holdout=False):
         logger.info('Evaluating model')
 
         if eval_on_holdout:
@@ -254,8 +252,8 @@ class EvalOffline(object):
 
         # d['coll_labels'] has shape (-1, horizon)
         # d['coll_preds'] has shape (-1, self._num_bnn_samples, horizon)
-        plotter = BnnPlotter(d['coll_preds'], d['coll_labels'])
-        plotter.save_all_plots(self._save_dir)
+
+        # TODO: plot stuff
         # import IPython; IPython.embed()
 
 if __name__ == '__main__':
@@ -281,5 +279,5 @@ if __name__ == '__main__':
             model.train()
 
         if not args.no_eval:
-            model.evaluate(eval_on_holdout=False)
-            model.evaluate(eval_on_holdout=True)
+            model.evaluate(None, eval_on_holdout=False)
+            model.evaluate(None, eval_on_holdout=True)

@@ -3,6 +3,7 @@ from collections import defaultdict
 import logging
 from colorlog import ColoredFormatter
 
+import pandas
 import numpy as np
 
 from .tabulate import tabulate
@@ -134,11 +135,18 @@ class LoggerClass(object):
         tabular_dict = defaultdict(lambda: np.nan)
         tabular_dict.update(dict(self._tabular))
         keys_sorted = tuple(sorted(tabular_dict.keys()))
-        mode = 'a' if os.path.exists(self._csv_path) else 'w'
+
+        if os.path.exists(self._csv_path):
+            mode = 'a'
+            if self._tabular_keys is None:
+                self._tabular_keys = tuple(sorted(list(pandas.read_csv(self._csv_path).keys())))
+        else:
+            mode = 'w'
+            self._tabular_keys = keys_sorted
+
         with open(self._csv_path, mode) as f:
             writer = csv.writer(f)
             if mode == 'w':
-                self._tabular_keys = keys_sorted
                 writer.writerow(self._tabular_keys)
             else:
                 for k in keys_sorted:
