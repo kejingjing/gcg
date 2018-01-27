@@ -15,13 +15,15 @@ alg:
   
     inference:
       ssh: "gkahn@ahsoka.banatao.berkeley.edu"
-      remote_dir: "/home/gkahn/code/gcg/data"
+      remote_dir: "/home/gkahn/code/rllab/data/local"
 
       save_every_n_steps: 3.e+2 # for dt = 0.25, this is about 1.25 minutes
 
   ### Environment ###
 
   env: "RWrccarEnv(params={'collision_reward_only': True, 'collision_reward': -1, 'obs_shape': (V_height, V_width, V_color)})"
+  env_eval: 
+  normalize_env: False
   max_path_length: 1000
   n_envs: 1 # number of training environments
   render: False
@@ -30,7 +32,7 @@ alg:
   ### Offpolicy data ###
 
   offpolicy_rosbags:
-    folders: ['/home/gkahn/code/gcg/data/rw_rccar/async1/rosbags', '/home/gkahn/code/gcg/data/rw_rccar/async2/rosbags', '/home/gkahn/code/gcg/data/rw_rccar/async3/rosbags', '/home/gkahn/code/gcg/data/rw_rccar/async4/rosbags']
+    folders: ['/home/gkahn/code/rllab/data/local/rw-rccar/async1/rosbags', '/home/gkahn/code/rllab/data/local/rw-rccar/async2/rosbags', '/home/gkahn/code/rllab/data/local/rw-rccar/async3/rosbags', '/home/gkahn/code/rllab/data/local/rw-rccar/async4/rosbags']
     total_steps: 4.e+5
     save_every_n_steps: 1.e+4
     update_target_every_n_steps: 1.e+3
@@ -44,7 +46,7 @@ alg:
   total_steps: 14.4e+3 # 1 hours worth, corresponding to number of env.step(...) calls
 
   sample_after_n_steps: -1
-  onpolicy_after_n_steps: -1 # take random actions until this many steps is reached
+  onpolicy_after_n_steps: 1.e+3 # take random actions until this many steps is reached
 
   learn_after_n_steps: -1 # when to start training the model
   train_every_n_steps: 0.25 # number of calls to model.train per env.step (if fractional, multiple trains per step)
@@ -63,11 +65,11 @@ alg:
   exploration_strategies:
     # endpoints: [[step, value], [step, value], ...]
     GaussianStrategy: # additive gaussian noise
-      endpoints: [[0, 0.0], [1, 0.0]]
-      outside_value: 0.0
+      endpoints: [[0, 1.0], [9.6e+3, 0.1], [14.4e+3, 0.01]]
+      outside_value: 0.01
     EpsilonGreedyStrategy:
-      endpoints: [[0, 0.0], [1, 0.0]]
-      outside_value: 0.0
+      endpoints: [[0, 1.0], [9.6e+3, 0.1], [14.4e+3, 0.01]]
+      outside_value: 0.01
 
 
   ### Replay pool
@@ -84,7 +86,7 @@ alg:
 
   save_rollouts: True
   save_rollouts_observations: True # False saves space
-  save_env_infos: True # False saves space
+  save_env_infos: False # False saves space
 
 ##############
 ### Policy ###

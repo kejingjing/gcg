@@ -11,8 +11,6 @@ from gcg.envs.env_utils import create_env
 from . import utils
 
 from gcg.policies.gcg_policy import GCGPolicy
-from gcg.policies.probcoll_gcg_policy import ProbcollGCGPolicy
-from gcg.policies.multisensor_gcg_policy import MultisensorGCGPolicy
 
 ############################
 ### Multiple Experiments ###

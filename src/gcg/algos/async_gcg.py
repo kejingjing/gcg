@@ -3,16 +3,14 @@ import threading
 
 from gcg.envs.env_utils import create_env
 from gcg.policies.gcg_policy import GCGPolicy
-from gcg.policies.probcoll_gcg_policy import ProbcollGCGPolicy
-from gcg.policies.multisensor_gcg_policy import MultisensorGCGPolicy
 from gcg.data.timer import timeit
 from gcg.data.logger import logger
 from gcg.data import mypickle
 
 from gcg.algos.gcg import GCG
 
-class AsyncGCG(GCG):
 
+class AsyncGCG(GCG):
     def __init__(self, **kwargs):
         assert (kwargs['save_rollouts'])
         assert (kwargs['save_rollouts_observations'])
@@ -34,7 +32,7 @@ class AsyncGCG(GCG):
     #####################
 
     def _rsync_thread(self):
-        only_exp_dir = os.path.join(*self._save_dir.split('/')[-2:]) # exp_prefix/exp_name
+        only_exp_dir = os.path.join(*self._save_dir.split('/')[-2:])  # exp_prefix/exp_name
 
         while True:
             ### rsync for *_rollouts.pkl --> train
@@ -44,7 +42,7 @@ class AsyncGCG(GCG):
                 self._ssh,
                 os.path.join(self._remote_dir, only_exp_dir, ''))
             send_retcode = os.system(send_rsync_cmd)
-
+            
             ### rsync for train --> *_inference_policy.ckpt files
             with self._rsync_lock:
                 recv_rsync_cmd = "rsync -az -e 'ssh' --include='{0}' --exclude='*' {1}:{2} '{3}'".format(
@@ -120,10 +118,6 @@ class AsyncGCG(GCG):
                 break
 
             if inference_step >= self._learn_after_n_steps:
-                ### update preprocess
-                if train_step % self._update_preprocess_every_n_steps == 0:
-                    self._policy.update_preprocess(self._sampler.statistics)
-
                 ### training step
                 train_step += 1
                 timeit.start('batch')
@@ -183,7 +177,7 @@ class AsyncGCG(GCG):
                 break
             except Exception as e:
                 logger.warn('Reset exception {0}'.format(str(e)))
-                while not self._env.ros_is_good(print=False): # TODO hard coded
+                while not self._env.ros_is_good(print=False):  # TODO hard coded
                     time.sleep(0.25)
                 logger.warn('Continuing...')
 
@@ -196,7 +190,7 @@ class AsyncGCG(GCG):
 
         self._run_rsync()
 
-        assert (self._eval_sampler is None) # TODO: temporary
+        assert (self._eval_sampler is None)  # TODO: temporary
         train_rollouts = []
         eval_rollouts = []
 
@@ -214,8 +208,7 @@ class AsyncGCG(GCG):
                 timeit.start('sample')
                 try:
                     self._sampler.step(inference_step,
-                                       take_random_actions=(inference_step <= self._learn_after_n_steps or
-                                                            inference_step <= self._onpolicy_after_n_steps),
+                                       take_random_actions=(inference_step <= self._onpolicy_after_n_steps),
                                        explore=True)
                     inference_step += self._sampler.n_envs
                 except Exception as e:
@@ -223,7 +216,7 @@ class AsyncGCG(GCG):
                     trashed_steps = self._sampler.trash_current_rollouts()
                     inference_step -= trashed_steps
                     logger.warn('Trashed {0} steps'.format(trashed_steps))
-                    while not self._env.ros_is_good(print=False): # TODO hard coded
+                    while not self._env.ros_is_good(print=False):  # TODO hard coded
                         time.sleep(0.25)
                     self._reset_sampler()
                     logger.warn('Continuing...')
@@ -266,7 +259,6 @@ class AsyncGCG(GCG):
                 #if response != 'y':
                 #    train_rollouts = []
                 #    continue
-                
                 ### reset to stop rollout
                 self._sampler.reset()
 
@@ -278,7 +270,7 @@ class AsyncGCG(GCG):
                 eval_rollouts = []
 
                 ### load model
-                with self._rsync_lock: # to ensure the ckpt has been fully transferred over
+                with self._rsync_lock:  # to ensure the ckpt has been fully transferred over
                     new_train_itr = self._get_train_itr()
                     if train_itr < new_train_itr:
                         logger.debug('Loading policy for itr {0}'.format(new_train_itr - 1))
@@ -346,9 +338,11 @@ def create_async_gcg(params, log_fname):
     )
     return algo
 
+
 def run_async_gcg_train(params):
     algo = create_async_gcg(params, log_fname='log_train.txt')
     algo.train()
+
 
 def run_async_gcg_inference(params):
     # should only save minimal amount of rollouts in the replay buffer

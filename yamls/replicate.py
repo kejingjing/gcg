@@ -2,7 +2,7 @@
 How to use:
 (1) Create a template file
 (2) For all parameters you wish to iterate over, replace with a unique "V_<name>"
-(3) Fill in the below TODO
+(3)
 """
 
 import os
@@ -36,10 +36,7 @@ num_seeds = 1
 ######################
 
 def exp_name(num, seed):
-    s = '{0}{1:03d}'.format(BASE_EXP_NAME, num)
-    if seed is not None:
-        s += '/seed_{0}'.format(seed)
-    return s
+    return '{0}{1:03d}/seed_{2}'.format(BASE_EXP_NAME, num, seed)
 
 def exp_yaml_name(num, seed=None):
     s = '{0}{1:03d}'.format(BASE_EXP_NAME, num)
@@ -55,8 +52,8 @@ with open(exp_yaml_name(BASE_EXP_NUM), 'r') as f:
 for i, product in enumerate(itertools.product(*product_options)):
     curr_exp_num = BASE_EXP_NUM + 1 + i
     for curr_exp_seed in range(num_seeds):
-        curr_exp_name = exp_name(curr_exp_num, curr_exp_seed if num_seeds > 1 else None)
-        curr_exp_yaml_name = exp_yaml_name(curr_exp_num, curr_exp_seed if num_seeds > 1 else None)
+        curr_exp_name = exp_name(curr_exp_num, curr_exp_seed)
+        curr_exp_yaml_name = exp_yaml_name(curr_exp_num, curr_exp_seed)
 
         ### combine options into one dictionary
         curr_options = {}

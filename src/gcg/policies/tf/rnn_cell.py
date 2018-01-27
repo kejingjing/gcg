@@ -4,7 +4,7 @@ import tensorflow as tf
 ### Operations ###
 ##################
 
-def linear(args, output_size, dtype=tf.float32, scope=None):
+def linear(args, output_size, dtype=tf.float32, scope=None, trainable=True):
     with tf.variable_scope(scope or "linear"):
         if isinstance(args, list) or isinstance(args, tuple):
             if len(args) != 1:
@@ -26,7 +26,9 @@ def linear(args, output_size, dtype=tf.float32, scope=None):
             "weights",
             [total_arg_size, output_size],
             dtype=dtype,
-            initializer=tf.contrib.layers.xavier_initializer(dtype=dtype))
+            initializer=tf.contrib.layers.xavier_initializer(dtype=dtype),
+            trainable=trainable
+        )
         output = tf.matmul(inputs, weights)
     return output
 
@@ -37,7 +39,8 @@ def multiplicative_integration(
             weights_already_calculated=False,
             reg_collection=None,
             dtype=tf.float32,
-            scope=None):
+            scope=None,
+            trainable=True):
     '''
     expects len(2) for list of inputs and will perform integrative multiplication
     weights_already_calculated will treat the list of inputs as Wx and Uz and is useful for batch normed inputs
@@ -56,14 +59,18 @@ def multiplicative_integration(
                 output_size,
                 dtype=dtype,
                 reg_collection=reg_collection,
-                scope="Calculate_Wx_mulint")
+                scope="Calculate_Wx_mulint",
+                trainable=trainable
+            )
 
             Uz = linear(
                 list_of_inputs[1],
                 output_size,
                 dtype=dtype,
                 reg_collection=reg_collection,
-                scope="Calculate_Uz_mulint")
+                scope="Calculate_Uz_mulint",
+                trainable=trainable
+            )
 
         with tf.variable_scope("multiplicative_integration"):
             alpha = tf.get_variable(
@@ -73,7 +80,8 @@ def multiplicative_integration(
                 initializer=tf.truncated_normal_initializer(
                     mean=1.0,
                     stddev=0.1,
-                    dtype=dtype))
+                    dtype=dtype),
+            trainable=trainable)
 
             beta1, beta2 = tf.split(
                 tf.get_variable(
@@ -83,7 +91,8 @@ def multiplicative_integration(
                     initializer=tf.truncated_normal_initializer(
                         mean=0.5,
                         stddev=0.1,
-                        dtype=dtype)),
+                        dtype=dtype),
+                    trainable=trainable),
                 2,
                 axis=0)
 
@@ -94,7 +103,8 @@ def multiplicative_integration(
                 initializer=tf.truncated_normal_initializer(
                     mean=initial_bias_value,
                     stddev=0.1,
-                    dtype=dtype))
+                    dtype=dtype),
+                trainable=trainable)
 
         final_output = alpha * Wx * Uz + beta1 * Uz + beta2 * Wx + original_bias
 
@@ -157,7 +167,8 @@ class DpRNNCell(tf.nn.rnn_cell.BasicRNNCell):
             activation=tf.tanh,
             dtype=tf.float32,
             num_inputs=None,
-            weights_scope=None):
+            weights_scope=None,
+            trainable=True):
         self._num_units = num_units
         self._dropout_mask = dropout_mask
         self._activation = activation
@@ -169,7 +180,9 @@ class DpRNNCell(tf.nn.rnn_cell.BasicRNNCell):
                 [num_inputs + num_units, num_units],
                 dtype=dtype,
                 initializer=tf.contrib.layers.xavier_initializer(dtype=dtype),
-                regularizer=tf.contrib.layers.l2_regularizer(0.5))
+                regularizer=tf.contrib.layers.l2_regularizer(0.5),
+                trainable=trainable
+            )
 
     def __call__(
             self,
@@ -197,13 +210,15 @@ class DpMulintRNNCell(DpRNNCell):
             dtype=tf.float32,
             num_inputs=None,
             use_layer_norm=False,
-            weights_scope=None):
+            weights_scope=None,
+            trainable=True):
 
         self._num_units = num_units
         self._dropout_mask = dropout_mask
         self._activation = activation
         self._dtype = dtype
         self._use_layer_norm = use_layer_norm
+        self._trainable = trainable
 
         with tf.variable_scope(weights_scope or type(self).__name__):
             self._weights_W = tf.get_variable(
@@ -211,14 +226,18 @@ class DpMulintRNNCell(DpRNNCell):
                 [num_inputs, num_units],
                 dtype=dtype,
                 initializer=tf.contrib.layers.xavier_initializer(dtype=dtype),
-                regularizer=tf.contrib.layers.l2_regularizer(0.5))
+                regularizer=tf.contrib.layers.l2_regularizer(0.5),
+                trainable=trainable
+            )
 
             self._weights_U = tf.get_variable(
                 "weights_U",
                 [num_units, num_units],
                 dtype=dtype,
                 initializer=tf.contrib.layers.xavier_initializer(dtype=dtype),
-                regularizer=tf.contrib.layers.l2_regularizer(0.5))
+                regularizer=tf.contrib.layers.l2_regularizer(0.5),
+                trainable=trainable
+            )
 
     def __call__(
             self,
@@ -243,7 +262,8 @@ class DpMulintRNNCell(DpRNNCell):
                     [Wx, Uz],
                     self._num_units,
                     dtype=self._dtype,
-                    weights_already_calculated=True))
+                    weights_already_calculated=True,
+                    trainable=self._trainable))
 
             if self._dropout_mask is not None:
                 output = output * self._dropout_mask
@@ -260,7 +280,8 @@ class DpLSTMCell(tf.nn.rnn_cell.BasicLSTMCell):
             activation=tf.tanh,
             dtype=tf.float32,
             num_inputs=None,
-            weights_scope=None):
+            weights_scope=None,
+            trainable=True):
         self._num_units = num_units
         self._forget_bias = forget_bias
         self._dropout_mask = dropout_mask
@@ -274,7 +295,9 @@ class DpLSTMCell(tf.nn.rnn_cell.BasicLSTMCell):
                 [num_inputs + num_units, 4 * num_units],
                 dtype=dtype,
                 initializer=tf.contrib.layers.xavier_initializer(dtype=dtype),
-                regularizer=tf.contrib.layers.l2_regularizer(0.5))
+                regularizer=tf.contrib.layers.l2_regularizer(0.5),
+                trainable=trainable
+            )
 
     def __call__(
             self,
@@ -314,7 +337,8 @@ class DpMulintLSTMCell(DpLSTMCell):
             dtype=tf.float32,
             num_inputs=None,
             use_layer_norm=False,
-            weights_scope=None):
+            weights_scope=None,
+            trainable=True):
 
         self._num_units = num_units
         self._forget_bias = forget_bias
@@ -323,6 +347,7 @@ class DpMulintLSTMCell(DpLSTMCell):
         self._dtype = dtype
         self._use_layer_norm = use_layer_norm
         self._state_is_tuple = True
+        self._trainable = trainable
 
         with tf.variable_scope(weights_scope or type(self).__name__):
             self._weights_W = tf.get_variable(
@@ -330,14 +355,18 @@ class DpMulintLSTMCell(DpLSTMCell):
                 [num_inputs, 4 * num_units],
                 dtype=dtype,
                 initializer=tf.contrib.layers.xavier_initializer(dtype=dtype),
-                regularizer=tf.contrib.layers.l2_regularizer(0.5))
+                regularizer=tf.contrib.layers.l2_regularizer(0.5),
+                trainable=trainable
+            )
 
             self._weights_U = tf.get_variable(
                 "weights_U",
                 [num_units, 4 * num_units],
                 dtype=dtype,
                 initializer=tf.contrib.layers.xavier_initializer(dtype=dtype),
-                regularizer=tf.contrib.layers.l2_regularizer(0.5))
+                regularizer=tf.contrib.layers.l2_regularizer(0.5),
+                trainable=trainable
+            )
 
     def __call__(
             self,
@@ -365,7 +394,8 @@ class DpMulintLSTMCell(DpLSTMCell):
                     [Wx, Uz],
                     4 * self._num_units,
                     dtype=self._dtype,
-                    weights_already_calculated=True))
+                    weights_already_calculated=True,
+                    trainable=self._trainable))
 
             i, j, f, o = tf.split(output, 4, axis=1)
 

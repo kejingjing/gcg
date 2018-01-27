@@ -1,6 +1,7 @@
 *#
 *.pyc
 *~
-.idea
-scripts/plots
+*.swp
+data
 yamls
+.idea

@@ -5,29 +5,45 @@ class VecEnvExecutor(object):
     def __init__(self, envs, max_path_length):
         self.envs = envs
         self._action_space = envs[0].action_space
-        self._observation_im_space = envs[0].observation_im_space
-        self._observation_vec_space = envs[0].observation_vec_space
         self.ts = np.zeros(len(self.envs), dtype='int')
         self.max_path_length = max_path_length
+        self._skips = np.array([False] * len(self.envs))
 
     def step(self, action_n):
-        all_results = [env.step(a) for (a, env) in zip(action_n, self.envs)]
-        obs, rewards, dones, env_infos = list(map(list, list(zip(*all_results))))
+        all_results = []
+        for i, env in enumerate(self.envs):
+            if self._skips[i]:
+                ob, goal = env.reset()
+                self.ts[i] = 0
+                all_result = [ob, goal, 0., True, {}]
+                all_results.append(all_result)
+            else:
+                all_result = env.step(action_n[i])
+                all_results.append(all_result)
+                self.ts[i] += 1
+        obs, goals, rewards, dones, env_infos = list(map(list, list(zip(*all_results))))
         dones = np.asarray(dones)
         rewards = np.asarray(rewards)
-        self.ts += 1
         if self.max_path_length is not None:
             dones[self.ts >= self.max_path_length] = True
         for (i, done) in enumerate(dones):
-            if done:
-                obs[i] = self.envs[i].reset()
-                self.ts[i] = 0
-        return obs, rewards, dones, env_infos
+            if self._skips[i]:
+                self._skips[i] = False
+            elif done:
+                self._skips[i] = True
+                dones[i] = False
+        return obs, goals, rewards, dones, env_infos
 
     def reset(self):
-        results = [env.reset() for env in self.envs]
+        obs = []
+        goals = []
+        for env in self.envs:
+            ob, goal = env.reset()
+            obs.append(ob)
+            goals.append(goal)
         self.ts[:] = 0
-        return results
+        self._skips[:] = False
+        return obs, goals
 
     @property
     def num_envs(self):
@@ -36,14 +52,6 @@ class VecEnvExecutor(object):
     @property
     def action_space(self):
         return self._action_space
-
-    @property
-    def observation_im_space(self):
-        return self._observation_im_space
-
-    @property
-    def observation_vec_space(self):
-        return self._observation_vec_space
 
     def terminate(self):
         pass

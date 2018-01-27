@@ -3,8 +3,6 @@ import numpy as np
 
 from gcg.envs.env_utils import create_env
 from gcg.policies.gcg_policy import GCGPolicy
-from gcg.policies.probcoll_gcg_policy import ProbcollGCGPolicy
-from gcg.policies.multisensor_gcg_policy import MultisensorGCGPolicy
 from gcg.sampler.sampler import Sampler
 from gcg.data.timer import timeit
 from gcg.data.logger import logger
@@ -15,6 +13,7 @@ class GCG(object):
     def __init__(self, **kwargs):
 
         self._save_dir = kwargs['save_dir']
+        self._load_dir = kwargs.get('load_dir', self._save_dir)
         self._env = kwargs['env']
         self._policy = kwargs['policy']
 
@@ -62,17 +61,16 @@ class GCG(object):
         self._learn_after_n_steps = int(alg_args['learn_after_n_steps'])
         self._train_every_n_steps = alg_args['train_every_n_steps']
         self._eval_every_n_steps = int(alg_args['eval_every_n_steps'])
+        self._rollouts_per_eval = int(alg_args.get('rollouts_per_eval', 1))
         self._save_every_n_steps = int(alg_args['save_every_n_steps'])
         self._update_target_after_n_steps = int(alg_args['update_target_after_n_steps'])
         self._update_target_every_n_steps = int(alg_args['update_target_every_n_steps'])
-        self._update_preprocess_every_n_steps = int(alg_args['update_preprocess_every_n_steps'])
         self._log_every_n_steps = int(alg_args['log_every_n_steps'])
         assert (self._learn_after_n_steps % self._sampler.n_envs == 0)
         if self._train_every_n_steps >= 1:
             assert (int(self._train_every_n_steps) % self._sampler.n_envs == 0)
         assert (self._save_every_n_steps % self._sampler.n_envs == 0)
         assert (self._update_target_every_n_steps % self._sampler.n_envs == 0)
-        assert (self._update_preprocess_every_n_steps % self._sampler.n_envs == 0)
 
     #############
     ### Files ###
@@ -89,6 +87,12 @@ class GCG(object):
 
     def _inference_policy_file_name(self, itr):
         return os.path.join(self._save_dir, 'itr_{0:04d}_inference_policy.ckpt'.format(itr))
+
+    def _load_train_policy_file_name(self, itr):
+        return os.path.join(self._load_dir, 'itr_{0:04d}_train_policy.ckpt'.format(itr))
+
+    def _load_inference_policy_file_name(self, itr):
+        return os.path.join(self._load_dir, 'itr_{0:04d}_inference_policy.ckpt'.format(itr))
 
     ############
     ### Save ###
@@ -169,12 +173,12 @@ class GCG(object):
         :return: iteration that it is currently on
         """
         itr = 0
-        while len(glob.glob(self._train_policy_file_name(itr) + '*')) > 0:
+        while len(glob.glob(os.path.splitext(self._load_train_policy_file_name(itr))[0] + '*')) > 0:
             itr += 1
 
         if itr > 0:
-            logger.info('Loading train policy from iteration {0}...'.format(itr - 1))
-            self._policy.restore(self._train_policy_file_name(itr - 1), train=True)
+            logger.info('Loading train policy from {0} iteration {1}...'.format(self._load_dir, itr - 1))
+            self._policy.restore(self._load_train_policy_file_name(itr - 1), train=True)
             logger.info('Loaded train policy!')
 
     def _restore_inference_policy(self):
@@ -182,12 +186,12 @@ class GCG(object):
         :return: iteration that it is currently on
         """
         itr = 0
-        while len(glob.glob(self._inference_policy_file_name(itr) + '*')) > 0:
+        while len(glob.glob(self._load_inference_policy_file_name(itr) + '*')) > 0:
             itr += 1
 
         if itr > 0:
             logger.info('Loading inference policy from iteration {0}...'.format(itr - 1))
-            self._policy.restore(self._inference_policy_file_name(itr - 1), train=False)
+            self._policy.restore(self._load_inference_policy_file_name(itr - 1), train=False)
             logger.info('Loaded inference policy!')
 
     def _restore(self):
@@ -222,44 +226,46 @@ class GCG(object):
             if step > self._sample_after_n_steps:
                 timeit.start('sample')
                 self._sampler.step(step,
-                                   take_random_actions=(step <= self._learn_after_n_steps or
-                                                        step <= self._onpolicy_after_n_steps),
+                                   take_random_actions=(step <= self._onpolicy_after_n_steps),
                                    explore=True)
                 timeit.stop('sample')
 
             ### sample and DON'T add to buffer (for validation)
             if self._eval_sampler is not None and step > 0 and step % self._eval_every_n_steps == 0:
                 timeit.start('eval')
-                eval_rollouts_step = []
-                eval_step = step
-                while len(eval_rollouts_step) == 0:
-                    self._eval_sampler.step(eval_step, explore=False)
-                    eval_rollouts_step = self._eval_sampler.get_recent_paths()
-                    eval_step += 1
-                eval_rollouts += eval_rollouts_step
+                for _ in range(self._rollouts_per_eval):
+                    eval_rollouts_step = []
+                    eval_step = step
+                    while len(eval_rollouts_step) == 0:
+                        self._eval_sampler.step(eval_step, explore=False)
+                        eval_rollouts_step = self._eval_sampler.get_recent_paths()
+                        eval_step += 1
+                    eval_rollouts += eval_rollouts_step
                 timeit.stop('eval')
 
             if step >= self._learn_after_n_steps:
-                ### update preprocess
-                if step == self._learn_after_n_steps or step % self._update_preprocess_every_n_steps == 0:
-                    self._policy.update_preprocess(self._sampler.statistics)
-
                 ### training step
                 if self._train_every_n_steps >= 1:
                     if step % int(self._train_every_n_steps) == 0:
                         timeit.start('batch')
-                        batch = self._sampler.sample(self._batch_size)
+                        steps, observations, actions, rewards, dones, _ = \
+                            self._sampler.sample(self._batch_size)
                         timeit.stop('batch')
                         timeit.start('train')
-                        self._policy.train_step(step, *batch, use_target=target_updated)
+                        self._policy.train_step(step, steps=steps, observations=observations,
+                                                actions=actions, rewards=rewards, dones=dones,
+                                                use_target=target_updated)
                         timeit.stop('train')
                 else:
                     for _ in range(int(1. / self._train_every_n_steps)):
                         timeit.start('batch')
-                        batch = self._sampler.sample(self._batch_size)
+                        steps, observations, actions, rewards, dones, _ = \
+                            self._sampler.sample(self._batch_size)
                         timeit.stop('batch')
                         timeit.start('train')
-                        self._policy.train_step(step, *batch, use_target=target_updated)
+                        self._policy.train_step(step, steps=steps, observations=observations,
+                                                actions=actions, rewards=rewards, dones=dones,
+                                                use_target=target_updated)
                         timeit.stop('train')
 
                 ### update target network
@@ -295,6 +301,8 @@ def run_gcg(params):
     assert (os.path.exists(data_dir))
     save_dir = os.path.join(data_dir, params['exp_name'])
     os.makedirs(save_dir, exist_ok=True)
+    load_dir = os.path.join(data_dir, params.get('load_policy', params['exp_name']))
+    assert (os.path.exists(load_dir))
     logger.setup(display_name=params['exp_name'],
                  log_path=os.path.join(save_dir, 'log.txt'),
                  lvl=params['log_level'])
@@ -342,6 +350,7 @@ def run_gcg(params):
         max_path_length = env.horizon
     algo = GCG(
         save_dir=save_dir,
+        load_dir=load_dir,
         env=env,
         env_eval=env_eval,
         policy=policy,
