@@ -262,10 +262,10 @@ class AsyncGCG(GCG):
             train_rollouts += self._sampler.get_recent_paths()
             if inference_step > 0 and inference_step % self._inference_save_every_n_steps == 0 and \
                len(train_rollouts) > 0:
-                response = input('Keep rollouts?')
-                if response != 'y':
-                    train_rollouts = []
-                    continue
+                #response = input('Keep rollouts?')
+                #if response != 'y':
+                #    train_rollouts = []
+                #    continue
                 
                 ### reset to stop rollout
                 self._sampler.reset()
