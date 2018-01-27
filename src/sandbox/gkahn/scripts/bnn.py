@@ -347,7 +347,7 @@ class EvalOffline(object):
 
         # d['coll_labels'] has shape (-1, horizon)
         # d['coll_preds'] has shape (-1, self._num_bnn_samples, horizon)
-        import IPython; IPython.embed()
+        # import IPython; IPython.embed()
         plotter = BnnPlotter(d['coll_preds'], d['coll_labels'])
         plotter.save_all_plots(self._eval_holdout_dir if eval_on_holdout else self._eval_train_dir)
 

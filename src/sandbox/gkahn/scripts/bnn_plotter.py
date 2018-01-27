@@ -48,10 +48,11 @@ class BnnPlotter(object):
         fig, axs = plt.subplots(num_replays_to_plot, self.num_time_steps_pred,
                                 sharex=True, sharey=True, tight_layout=False, figsize=(18, 10))
         for i_replay in range(num_replays_to_plot):
+            i_coll = np.random.randint(0, self.num_replays)
             for i_time in range(self.num_time_steps_pred):
                 ax = axs[i_replay, i_time]
-                x = self.preds[:, i_replay, i_time]
-                color = 'b' if self.labels[i_replay, i_time] == 0 else 'r'
+                x = self.preds[i_coll, :, i_time]
+                color = 'b' if self.labels[i_coll, i_time] == 0 else 'r'
                 ax.hist(x, 20, range=(0.,1.), color=color)
                 if i_replay == num_replays_to_plot - 1:
                     ax.set_xlabel("t = {}".format(i_time))
