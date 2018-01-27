@@ -14,8 +14,6 @@ class BayesByBackprop(object):
 
     @staticmethod
     def _make_positive(x):
-            # return tf.log(1. + tf.exp(x))
-            # return tf.exp(x)
             return tf.nn.softplus(x)
 
     def _get_weights_or_biases_and_regularize(self, shape, mu_initializer, regularizer, str_weights_or_biases):
