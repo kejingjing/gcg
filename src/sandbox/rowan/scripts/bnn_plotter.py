@@ -1,10 +1,12 @@
-import os
-import numpy as np
 import matplotlib.pyplot as plt
+import matplotlib.cm as cm
+import numpy as np
+import os
+
 
 class BnnPlotter(object):
 
-    def __init__(self, preds, labels):
+    def __init__(self, preds, labels, comparison_data={}):
         """
         preds: num_replays x num_bnn_samples x action_len-1
         labels: num_replays x action_len
@@ -12,45 +14,57 @@ class BnnPlotter(object):
         """
         self.preds = preds
         self.labels = labels
+        self.comparison_data = comparison_data
         self.num_replays = preds.shape[0]
         self.num_bnn_samples = preds.shape[1]
         self.num_time_steps_pred = preds.shape[2]
         self.num_time_steps_replay = labels.shape[1]
         assert preds.shape[0] == labels.shape[0]
 
-    def save_all_plots(self, dir):
-
+    def save_all_evaluation_plots(self, dir, env_name="UnknownEnv"):
         plot_types = ['plot_hist_individual_predictions',
                       'plot_hist_time_to_collision',
                       'plot_scatter_time_to_collision',
                       'plot_pred_timeseries']
 
         for plot_type in plot_types:
-            plot_method = self._get_plot_method(plot_type)
-            fig, ax = plot_method()
-            file_path = os.path.join(dir, plot_type + '.png')
-            fig.savefig(file_path, bbox_inches='tight')
-            plt.close(fig)
+            fig = self._plot(plot_type)
+            fig_name = env_name + plot_type
+            self._save_fig(fig, dir, fig_name)
 
 
-    def show(self, plot_type):
-        plot_method = self._get_plot_method(plot_type)
-        plot_method()
+    def save_map_uncertainty_plot(self, dir, env_name="UnkownEnv", **kwargs):
+        fig, _ = self.plot_map_uncertainty(**kwargs)
+        fig_name = env_name + 'plot_map_uncertainty'
+        self._save_fig(fig, dir, fig_name)
+
+
+    def show(self, plot_type, **kwargs):
+        self._plot(plot_type, **kwargs)
         plt.show(block=False)
 
 
-    def _get_plot_method(self, plot_type):
-        return getattr(self, plot_type)
+    def _plot(self, plot_type, **kwargs):
+        plot_method = getattr(self, plot_type)
+        fig, ax = plot_method(**kwargs)
+        return fig
+
+
+    def _save_fig(self, fig, dir, fig_name="unnamed", close_fig=True):
+        file_path = os.path.join(dir, fig_name + '.png')
+        fig.savefig(file_path, bbox_inches='tight')
+        if close_fig:
+            plt.close(fig)
 
 
     def plot_pred_timeseries(self, num_replays_to_plot=10):
         num_replays_to_plot = min(num_replays_to_plot, self.num_replays)
         fig, axs = plt.subplots(num_replays_to_plot, self.num_time_steps_pred,
-                                sharex=True, sharey=True, tight_layout=False, figsize=(18, 10))
+                                sharex=True, sharey=True, tight_layout=False, figsize=(20, 16))
         for i_replay in range(num_replays_to_plot):
             for i_time in range(self.num_time_steps_pred):
                 ax = axs[i_replay, i_time]
-                x = self.preds[:, i_replay, i_time]
+                x = self.preds[i_replay, :, i_time]
                 color = 'b' if self.labels[i_replay, i_time] == 0 else 'r'
                 ax.hist(x, 20, range=(0.,1.), color=color)
                 if i_replay == num_replays_to_plot - 1:
@@ -160,4 +174,45 @@ class BnnPlotter(object):
         plt.legend(loc='upper right')
         plt.xlabel("Expected Probability of Collision")
         plt.ylabel("Sigma Probability of Collision")
+        return fig, ax
+
+    def plot_map_uncertainty(self, env=None, env_infos=None):
+        """
+        env_infos: num_replays x action_len-1
+        :return:
+        """
+        max_num_replays = 100000
+        num_replays = len(env_infos)
+        num_replays = min(num_replays, max_num_replays)
+        xs, ys, us = [], [] ,[]
+        for i in range(num_replays):
+            info = env_infos[i, 0]
+            if not info:  # is empty after a collision
+                continue
+            pred_sigma = np.sqrt(np.sum(np.var(self.preds[i], axis=0)))  # num_replays
+            x, y = info['pos'][:2]
+            # coll = info['coll']
+            xs.append(x)
+            ys.append(y)
+            us.append(pred_sigma)  # uncertainties
+
+        # normalise roughly between 0 and 1
+        low = np.percentile(us, 10)
+        high = np.percentile(us, 90)
+        if self.comparison_data.get('percentiles', None) is None:
+            self.comparison_data['percentiles'] = {'low': low, 'high': high}
+        us -= self.comparison_data['percentiles']['low']
+        us /= self.comparison_data['percentiles']['high']
+
+        colors = cm.rainbow(us)
+        fig, ax = plt.subplots(1, 1, figsize=(20, 16))
+        ax.scatter(xs, ys, color=colors, alpha=0.3)
+        if hasattr(env, 'cone_positions'):
+            cone_positions = np.array(env.cone_positions)  # num_cones x 3 (xyz)
+            ax.scatter(cone_positions[:,0], cone_positions[:,1], color='black', s=100)
+        title = "Predictive time-to-collision-uncertainty (purple more certain, red more uncertain). " \
+                "Sigma range [{0:.6f}, {0:.6f}]"
+        plt.title(title.format(low, high))
+        plt.xlabel("X position")
+        plt.ylabel("Y position")
         return fig, ax

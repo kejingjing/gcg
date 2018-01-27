@@ -35,6 +35,8 @@ class EvalOffline(object):
         logger.info('')
         logger.info('Creating environment')
         self._env = create_env(self._params['alg']['env'])
+        logger.info('Creating holdout environment')
+        self._env_holdout = create_env(self._params['alg'].get('env_holdout', None))
 
         logger.info('')
         logger.info('Creating model')
@@ -109,18 +111,21 @@ class EvalOffline(object):
 
         return policy
 
+
     def _restore_train_policy(self):
         """
         :return: iteration that it is currently on
         """
         itr = 0
-        while len(glob.glob(self._train_policy_file_name(itr) + '*')) > 0:
+        while len(glob.glob(os.path.splitext(self._train_policy_file_name(itr))[0] + '*')) > 0:
             itr += 1
 
         if itr > 0:
             logger.info('Loading train policy from iteration {0}...'.format(itr - 1))
-            self._policy.restore(self._train_policy_file_name(itr - 1), train=True)
+            self._model.restore(self._train_policy_file_name(itr - 1), train=True)
             logger.info('Loaded train policy!')
+
+
 
     def _save_train_policy(self, save_itr):
         self._model.save(self._train_policy_file_name(save_itr), train=True)
@@ -212,13 +217,18 @@ class EvalOffline(object):
     ### Evaluate ###
     ################
 
-    def evaluate(self, eval_on_holdout=False):
+    def evaluate(self, eval_on_holdout=False, comparison_data={}):
         logger.info('Evaluating model')
 
         if eval_on_holdout:
             replay_pool = self._replay_holdout_pool
+            env_name = "EnvHoldout"
+            env = self._env_holdout
+
         else:
             replay_pool = self._replay_pool
+            env_name = "EnvTraining"
+            env = self._env
 
         # get collision idx in obs_vec
         vec_spec = self._env.observation_vec_spec
@@ -254,10 +264,13 @@ class EvalOffline(object):
 
         # d['coll_preds'] has shape (num_replays, self._num_bnn_samples, horizon)
         # d['coll_labels'] has shape (num_replays, horizon)
-        plotter = BnnPlotter(d['coll_preds'], d['coll_labels'])
-        plotter.save_all_plots(self._save_dir)
-        import IPython; IPython.embed()
-        # TODO: look at d['env_infos'] dict of position etc, then use self._env.positions cone locations, then plot.
+        plotter = BnnPlotter(preds=d['coll_preds'], labels=d['coll_labels'], comparison_data=comparison_data)
+        logger.info('Saving evaluation plots to {}'.format(self._save_dir))
+        plotter.save_all_evaluation_plots(self._save_dir, env_name=env_name)
+        plotter.save_map_uncertainty_plot(self._save_dir, env_name=env_name, env=env, env_infos=d['env_infos'])
+        return plotter.comparison_data
+        # import IPython; IPython.embed()
+
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
@@ -282,5 +295,6 @@ if __name__ == '__main__':
             model.train()
 
         if not args.no_eval:
-            model.evaluate(eval_on_holdout=False)
-            model.evaluate(eval_on_holdout=True)
+            comparison_data = model.evaluate(eval_on_holdout=False)
+            comparison_data = model.evaluate(eval_on_holdout=True, comparison_data=comparison_data)
+    # import IPython; IPython.embed()

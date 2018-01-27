@@ -1,4 +1,4 @@
-exp_name: bnn/concrete_dropout
+exp_name: bnn/bayes_by_backprop
 log_level: debug
 
 ###############
@@ -8,7 +8,8 @@ log_level: debug
 offline:
   # all paths are relative to gcg/data
   data: bnn/datasets/SquareClutteredEnv_random30000
-  data_holdout: bnn/datasets/SquareClutteredConeEnv_random30000
+#  data_holdout: bnn/datasets/SquareClutteredConeEnv_random30000
+  data_holdout: old/offline/holdout_data3  # Greg's translated pickle file from the coloured walls env
 
   init_checkpoint: bnn/deterministic/itr_0024_train_policy.ckpt
   init_restore: ['image', 'observation', 'action', 'rnn'] # what parts of graph to restore? given as a list which may contain ['train', 'image', 'observation', 'action', 'rnn', 'output']
@@ -107,7 +108,7 @@ policy:
     batch_norm_decay: 0.9
     trainable: True
     num_data: 29996 # TODO(rowan): find a way to not hard code this in the future.
-    bnn_method: concrete_dropout # TODO(rowan) concrete_dropout or bayes_by_backprop or probabilistic_backprop or bootstrap
+    bnn_method: bayes_by_backprop # TODO(rowan) concrete_dropout or bayes_by_backprop or probabilistic_backprop or bootstrap
 
   only_completed_episodes: False # only train with fully completed episodes?
 

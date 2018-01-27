@@ -5,22 +5,22 @@ from gcg.envs.sim_rccar.square_env import SquareEnv
 class SquareClutteredConeEnv(SquareEnv):
     def __init__(self, params={}):
         params.setdefault('model_path', os.path.join(os.path.dirname(os.path.abspath(__file__)), 'models/square_cluttered_cone.egg'))
-        self.positions = None
+        self.cone_positions = None
 
         SquareEnv.__init__(self, params=params)
 
     def _setup_map(self):
         path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'models/traffic_cone.egg')
-        self.positions = [(20., -15., 0.4),
-                          (18.3, -11.5, 0.4),
-                          (21.6, 3.9, 0.4),
-                          (20.6, 15, 0.4),
-                          (10.5, 19.5, 0.4),
-                          (10.5, 20.5, 0.4),
-                          (-4.9, 20.3, 0.4)]
+        self.cone_positions = [(20., -15., 0.4),
+                               (18.3, -11.5, 0.4),
+                               (21.6, 3.9, 0.4),
+                               (20.6, 15, 0.4),
+                               (10.5, 19.5, 0.4),
+                               (10.5, 20.5, 0.4),
+                               (-4.9, 20.3, 0.4)]
         hpr = (0, 0, 0)
         scale = 0.5
-        for pos in self.positions:
+        for pos in self.cone_positions:
             self._setup_collision_object(path, pos, hpr, scale=scale)
 
         self._setup_collision_object(self._model_path)

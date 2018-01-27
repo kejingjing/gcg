@@ -864,7 +864,7 @@ class GCGPolicy(object):
             saver = self._tf_dict['savers_dict'][saver_name]
             saver.save(self._tf_dict['sess'], self._saver_ckpt_name(ckpt_name, saver_name), write_meta_graph=False)
 
-    def restore(self, ckpt_name, train=True, train_restore=('train,')):
+    def restore(self, ckpt_name, train=True, train_restore=('train',)):
         """
         :param: train_restore: 'train', 'image', 'observation', 'action', 'rnn', 'output
         """
