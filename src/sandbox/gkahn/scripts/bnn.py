@@ -260,7 +260,6 @@ class EvalOffline(object):
         update_target_after_n_steps = int(alg_args['update_target_after_n_steps'])
         update_target_every_n_steps = int(alg_args['update_target_every_n_steps'])
         log_every_n_steps = int(alg_args['log_every_n_steps'])
-        batch_size = alg_args['batch_size']
 
         timeit.reset()
         timeit.start('total')
