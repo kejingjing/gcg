@@ -46,7 +46,7 @@ class AsyncGCG(GCG):
             ### rsync for train --> *_inference_policy.ckpt files
             with self._rsync_lock:
                 recv_rsync_cmd = "rsync -az -e 'ssh' --include='{0}' --exclude='*' {1}:{2} '{3}'".format(
-                    '*_inference_policy.ckpt*',
+                    '*_inference_policy_inference.ckpt*',
                     self._ssh,
                     os.path.join(self._remote_dir, only_exp_dir, ''),
                     os.path.join(self._save_dir, '')
