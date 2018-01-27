@@ -161,7 +161,7 @@ def fcnn(
                 batch_size = params.get('batch_size', None)  # TODO: find a better solution than yaml file to get this value
 
                 if bnn_method == 'concrete_dropout':
-                    if i < len(dims) - 1:
+                    if i < len(dims) - 1: # TODO logic is not always right
                         fc_layer = ConcreteDropout
                         fc_layer_args = {'num_data': num_data}
                     else:

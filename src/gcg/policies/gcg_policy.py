@@ -201,6 +201,7 @@ class GCGPolicy(object):
                 if tf_obs_vec_ph.get_shape()[1].value > 0:
                     layer = tf.concat([layer, tf.reshape(tf_obs_vec_ph, [-1, self._obs_history_len * self._obs_vec_dim])], axis=1)
 
+                self._observation_graph.update({'batch_size': tf.shape(layer)[0]})
                 tf_obs_lowd = networks.fcnn(layer, self._observation_graph, is_training=is_training, global_step_tensor=self.global_step)
 
         return tf_obs_lowd
@@ -219,6 +220,7 @@ class GCGPolicy(object):
 
         with tf.variable_scope(self._action_scope):
             self._action_graph.update({'output_dim': self._observation_graph['output_dim']})
+            self._action_graph.update({'batch_size': batch_size})
             rnn_inputs = networks.fcnn(tf_actions_ph, self._action_graph, is_training=is_training,
                                           T=H, global_step_tensor=self.global_step)
 
@@ -703,8 +705,6 @@ class GCGPolicy(object):
 
             ### initialize
             self._graph_init_vars(tf_sess)
-
-            import IPython; IPython.embed()
 
         ### what to return
         return {

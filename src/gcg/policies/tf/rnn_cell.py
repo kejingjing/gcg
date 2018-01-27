@@ -175,6 +175,8 @@ class DpRNNCell(tf.nn.rnn_cell.BasicRNNCell):
             num_inputs=None,
             weights_scope=None,
             trainable=True):
+        raise NotImplementedError
+
         self._num_units = num_units
         self._dropout_mask = dropout_mask
         self._activation = activation
@@ -218,6 +220,7 @@ class DpMulintRNNCell(DpRNNCell):
             use_layer_norm=False,
             weights_scope=None,
             trainable=True):
+        raise NotImplementedError
 
         self._num_units = num_units
         self._dropout_mask = dropout_mask
@@ -288,6 +291,8 @@ class DpLSTMCell(tf.nn.rnn_cell.BasicLSTMCell):
             num_inputs=None,
             weights_scope=None,
             trainable=True):
+        raise NotImplementedError
+
         self._num_units = num_units
         self._forget_bias = forget_bias
         self._dropout_mask = dropout_mask
