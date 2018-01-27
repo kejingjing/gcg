@@ -3,9 +3,7 @@ import glob
 import os
 import yaml
 from collections import defaultdict
-import threading
 import multiprocessing
-from queue import Queue
 
 import numpy as np
 
@@ -14,10 +12,11 @@ from gcg.envs.env_utils import create_env
 from gcg.data import mypickle
 from gcg.sampler.replay_pool import ReplayPool
 from gcg.policies.tf.bnn.bootstrap.bootstrap_replay_pool import BootstrapReplayPool
+from gcg.data.timer import timeit
 
 from gcg.policies.gcg_policy import GCGPolicy
 
-from gcg.data.timer import timeit
+from bnn_plotter import BnnPlotter
 
 class EvalOffline(object):
     def __init__(self, yaml_path):
@@ -98,6 +97,21 @@ class EvalOffline(object):
         if self._params['offline']['init_checkpoint'] is not None:
             return os.path.join(self._dir, self._params['offline']['init_checkpoint'])
 
+    @property
+    def _eval_train_dir(self):
+        train_str = os.path.basename(self._data_file_name)
+        dir = os.path.join(self._save_dir, 'eval_train_{0}/'.format(train_str))
+        os.makedirs(dir, exist_ok=True)
+        return dir
+
+    @property
+    def _eval_holdout_dir(self):
+        train_str = os.path.basename(self._data_file_name)
+        holdout_str = os.path.basename(self._data_holdout_file_name)
+        dir = os.path.join(self._save_dir, 'eval_train_{0}/holdout_{1}/'.format(train_str, holdout_str))
+        os.makedirs(dir, exist_ok=True)
+        return dir
+
     #############
     ### Model ###
     #############
@@ -139,12 +153,12 @@ class EvalOffline(object):
         :return: iteration that it is currently on
         """
         itr = 0
-        while len(glob.glob(self._train_policy_file_name(itr) + '*')) > 0:
+        while len(glob.glob(os.path.splitext(self._train_policy_file_name(itr))[0] + '*')) > 0:
             itr += 1
 
         if itr > 0:
             logger.info('Loading train policy from iteration {0}...'.format(itr - 1))
-            self._policy.restore(self._train_policy_file_name(itr - 1), train=True)
+            self._model.restore(self._train_policy_file_name(itr - 1), train=True)
             logger.info('Loaded train policy!')
 
     def _save_train_policy(self, save_itr):
@@ -223,7 +237,7 @@ class EvalOffline(object):
         self._batch_stop = multiprocessing.Event()
 
         self._batch_threads = []
-        for _ in range(10):
+        for _ in range(5):
             batch_thread = multiprocessing.Process(target=self._train_batch_thread,
                                                    args=(self._params['alg']['batch_size'],
                                                          self._batch_queue,
@@ -296,10 +310,8 @@ class EvalOffline(object):
     def evaluate(self, plotter, eval_on_holdout=False):
         logger.info('Evaluating model')
 
-        if eval_on_holdout:
-            replay_pool = self._replay_holdout_pool
-        else:
-            replay_pool = self._replay_pool
+
+        replay_pool = self._replay_holdout_pool if eval_on_holdout else self._replay_pool
 
         # get collision idx in obs_vec
         vec_spec = self._env.observation_vec_spec
@@ -335,9 +347,9 @@ class EvalOffline(object):
 
         # d['coll_labels'] has shape (-1, horizon)
         # d['coll_preds'] has shape (-1, self._num_bnn_samples, horizon)
-
-        # TODO: plot stuff
-        # import IPython; IPython.embed()
+        import IPython; IPython.embed()
+        plotter = BnnPlotter(d['coll_preds'], d['coll_labels'])
+        plotter.save_all_plots(self._eval_holdout_dir if eval_on_holdout else self._eval_train_dir)
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
@@ -362,7 +374,7 @@ if __name__ == '__main__':
             model.train()
 
         if not args.no_eval:
-            model.evaluate(None, eval_on_holdout=False)
+            # model.evaluate(None, eval_on_holdout=False)
             model.evaluate(None, eval_on_holdout=True)
 
         model.close()
