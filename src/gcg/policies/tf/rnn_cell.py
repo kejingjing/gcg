@@ -1,4 +1,7 @@
 import tensorflow as tf
+import numpy as np
+
+from gcg.policies.tf.bnn.concrete_dropout import ConcreteDropout
 
 ##################
 ### Operations ###
@@ -48,7 +51,7 @@ def multiplicative_integration(
     with tf.variable_scope(scope or 'double_inputs_multiple_integration'):
         if len(list_of_inputs) != 2: raise ValueError('list of inputs must be 2, you have:', len(list_of_inputs))
 
-        # TODO can do batch norm in FC
+        assert (weights_already_calculated) # TODO
         if weights_already_calculated:  # if you already have weights you want to insert from batch norm
             Wx = list_of_inputs[0]
             Uz = list_of_inputs[1]
@@ -338,7 +341,9 @@ class DpMulintLSTMCell(DpLSTMCell):
             num_inputs=None,
             use_layer_norm=False,
             weights_scope=None,
-            trainable=True):
+            trainable=True,
+            bnn_method=None,
+            **kwargs):
 
         self._num_units = num_units
         self._forget_bias = forget_bias
@@ -348,6 +353,7 @@ class DpMulintLSTMCell(DpLSTMCell):
         self._use_layer_norm = use_layer_norm
         self._state_is_tuple = True
         self._trainable = trainable
+        self._bnn_method = bnn_method
 
         with tf.variable_scope(weights_scope or type(self).__name__):
             self._weights_W = tf.get_variable(
@@ -368,6 +374,19 @@ class DpMulintLSTMCell(DpLSTMCell):
                 trainable=trainable
             )
 
+        # if bnn_method == 'concrete_dropout':
+        #     num_data = kwargs['num_data']
+        #     input_dim = self._num_units
+        #     self._concrete_dropout = ConcreteDropout('layer_name', num_data, input_dim)
+        #     self._fc_layer = tf.contrib.layers.fully_connected
+        #     self._weight_regularizer_scale = self._concrete_dropout.get_weight_regularizer_scale()
+        #     self._concrete_dropout_seed = np.random.randint(0, 1000)
+        # elif bnn_method is not None:
+        #     raise NotImplementedError('{0}'.format(bnn_method))
+        # else:
+        #     self._fc_layer = tf.contrib.layers.fully_connected
+        #     self._weight_regularizer_scale = 0.5
+
     def __call__(
             self,
             inputs,
@@ -380,6 +399,29 @@ class DpMulintLSTMCell(DpLSTMCell):
 
             Wx = tf.matmul(inputs, self._weights_W)
             Uz = tf.matmul(h, self._weights_U)
+
+            # Wx = self._fc_layer(
+            #     inputs=inputs,
+            #     num_outputs=4*self._num_units,
+            #     activation_fn=None,
+            #     normalizer_fn=None,
+            #     normalizer_params=None,
+            #     weights_initializer=tf.contrib.layers.xavier_initializer(dtype=self._dtype),
+            #     biases_initializer=None,
+            #     weights_regularizer=tf.contrib.layers.l2_regularizer(self._weight_regularizer_scale),
+            #     trainable=self._trainable)
+            #
+            # Uz = self._fc_layer(
+            #     inputs=h,
+            #     num_outputs=4 * self._num_units,
+            #     activation_fn=None,
+            #     normalizer_fn=None,
+            #     normalizer_params=None,
+            #     weights_initializer=tf.contrib.layers.xavier_initializer(dtype=self._dtype),
+            #     biases_initializer=None,
+            #     weights_regularizer=tf.contrib.layers.l2_regularizer(self._weight_regularizer_scale),
+            #     trainable=self._trainable)
+
             if self._use_layer_norm:
                 Wx = tf.contrib.layers.layer_norm(
                     Wx,
@@ -411,7 +453,12 @@ class DpMulintLSTMCell(DpLSTMCell):
 
             # TODO make sure this is correct
             if self._dropout_mask is not None:
+                raise NotImplementedError
                 new_c = new_c * self._dropout_mask
+
+            # if self._bnn_method == 'concrete_dropout':
+            #     sample = tf.contrib.distributions.Uniform().sample(tf.shape(new_c), seed=self._concrete_dropout_seed)
+            #     new_c, _= self._concrete_dropout.apply_soft_dropout_mask(new_c, sample)
 
             if self._use_layer_norm:
                 norm_c = tf.contrib.layers.layer_norm(

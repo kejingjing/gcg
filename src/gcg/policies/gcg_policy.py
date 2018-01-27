@@ -625,7 +625,7 @@ class GCGPolicy(object):
     def _graph_setup_savers(self, tf_preopt_vars, tf_postopt_vars, inference_only):
         savers_dict = dict()
 
-        savers_dict['inference'] = tf.train.Saver(set(tf_postopt_vars) - set(tf_preopt_vars), max_to_keep=None)
+        savers_dict['inference'] = tf.train.Saver(tf_preopt_vars, max_to_keep=None)
 
         if not inference_only:
             def filter_policy_vars(must_contain):
@@ -702,6 +702,8 @@ class GCGPolicy(object):
 
             ### initialize
             self._graph_init_vars(tf_sess)
+
+            import IPython; IPython.embed()
 
         ### what to return
         return {
