@@ -8,6 +8,8 @@ Click below to view video
 
 [![IMAGE ALT TEXT HERE](https://img.youtube.com/vi/vgiW0HlQWVE/0.jpg)](https://www.youtube.com/watch?v=vgiW0HlQWVE)
 
+TODO: everything below here is out of date
+
 ---
 # Code
 
