@@ -1,4 +1,4 @@
-exp_name: sim_rccar/forest_speed_dql
+exp_name: sim_rccar/forest_speed_nstep_dql
 seed: 0
 log_level: debug
 
@@ -70,7 +70,7 @@ alg:
 ##############
 
 policy:
-  N: 1 # label horizon
+  N: 8 # label horizon
   H: 1 # model horizon
   gamma: 0.99 # discount factor
   obs_history_len: 4 # number of previous observations to concatenate (inclusive)
@@ -142,7 +142,7 @@ policy:
   grad_clip_norm: 10 # clip the gradient magnitude
 
   # device
-  gpu_device: 0
+  gpu_device: 1
   gpu_frac: 0.4
  
   class: GCGPolicy # <GCGPolicy> model class

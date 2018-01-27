@@ -1,4 +1,4 @@
-exp_name: sim_rccar/forest_coll_bootstrap
+exp_name: sim_rccar/forest_speed_coll_bootstrap
 seed: 0
 log_level: debug
 
@@ -70,8 +70,8 @@ alg:
 ##############
 
 policy:
-  N: 1 # label horizon
-  H: 1 # model horizon
+  N: 16 # label horizon
+  H: 16 # model horizon
   gamma: 0.99 # discount factor
   obs_history_len: 4 # number of previous observations to concatenate (inclusive)
   
@@ -79,7 +79,7 @@ policy:
   separate_target_params: True # if target network, separate parameters?
 
   get_action_test: # how to select actions at test time (i.e., when gathering samples)
-    H: 1
+    H: 16
     type: random # <random/lattice> action selection method
     random:
       K: 4096

@@ -37,6 +37,7 @@ class CarEnv(DirectObject):
         self._use_depth = self._params.get('use_depth', False)
         self._use_back_cam = self._params.get('use_back_cam', False)
         # TODO
+        self._collision_only_reward = self._params.get('collision_only_reward', False)
         self._collision_reward = self._params.get('collision_reward', -10.0)
         self._obs_shape = self._params.get('obs_shape', (64, 36))
         self._steer_limits = params.get('steer_limits', (-30., 30.))
@@ -494,10 +495,16 @@ class CarEnv(DirectObject):
             return im.astype(np.uint8)
 
     def _get_reward(self):
-        if self._collision:
-            reward = self._collision_reward
+        if self._collision_only_reward:
+            if self._collision:
+                reward = -1.0
+            else:
+                reward = 0.0
         else:
-            reward = self._get_speed()
+            if self._collision:
+                reward = self._collision_reward
+            else:
+                reward = self._get_speed()
         assert (reward <= self.max_reward)
         return reward
 

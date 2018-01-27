@@ -47,13 +47,19 @@ class RoomClutteredEnv(SquareEnv):
         return goal
 
     def _get_reward(self):
-        if self._collision:
-            reward = self._collision_reward
+        if self._collision_only_reward:
+            if self._collision:
+                reward = -1.0
+            else:
+                reward = 0.0
         else:
-#            heading_reward = (np.cos(self._goal_heading[0] - self._get_heading()) + 1.) / 2.
-            heading_reward = np.cos(self._goal_heading - self._get_heading())
-            speed_reward = - (((self._goal_speed - self._get_speed()) / self._goal_speed) ** 2)
-            reward = heading_reward + speed_reward
+            if self._collision:
+                reward = self._collision_reward
+            else:
+    #            heading_reward = (np.cos(self._goal_heading[0] - self._get_heading()) + 1.) / 2.
+                heading_reward = np.cos(self._goal_heading - self._get_heading())
+                speed_reward = - (((self._goal_speed - self._get_speed()) / self._goal_speed) ** 2)
+                reward = heading_reward + speed_reward
         assert(reward <= self.max_reward)
         return reward
 
