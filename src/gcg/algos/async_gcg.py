@@ -121,10 +121,13 @@ class AsyncGCG(GCG):
                 ### training step
                 train_step += 1
                 timeit.start('batch')
-                batch = self._sampler.sample(self._batch_size)
+                steps, observations, actions, rewards, dones, _ = \
+                    self._sampler.sample(self._batch_size)
                 timeit.stop('batch')
                 timeit.start('train')
-                self._policy.train_step(train_step, *batch, use_target=target_updated)
+                self._policy.train_step(train_step, steps=steps, observations=observations,
+                                        actions=actions, rewards=rewards, dones=dones,
+                                        use_target=target_updated)
                 timeit.stop('train')
 
                 ### update target network
