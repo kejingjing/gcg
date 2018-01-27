@@ -3,6 +3,9 @@ import glob
 import os
 import yaml
 from collections import defaultdict
+import threading
+import multiprocessing
+from queue import Queue
 
 import numpy as np
 
@@ -10,8 +13,11 @@ from gcg.data.logger import logger
 from gcg.envs.env_utils import create_env
 from gcg.data import mypickle
 from gcg.sampler.replay_pool import ReplayPool
+from gcg.policies.tf.bnn.bootstrap.bootstrap_replay_pool import BootstrapReplayPool
 
 from gcg.policies.gcg_policy import GCGPolicy
+
+from gcg.data.timer import timeit
 
 class EvalOffline(object):
     def __init__(self, yaml_path):
@@ -56,6 +62,9 @@ class EvalOffline(object):
 
         self._num_bnn_samples = self._params['offline'].get('num_bnn_samples', 100)
 
+    def close(self):
+        self._model.terminate()
+
     #############
     ### Files ###
     #############
@@ -92,6 +101,24 @@ class EvalOffline(object):
     #############
     ### Model ###
     #############
+
+    @property
+    def num_bootstraps(self):
+        num_bootstraps = self._params['offline'].get('num_bootstraps')
+
+        if num_bootstraps is not None:
+            num_subgraph_bootstraps = 0
+            for subgraph_key in ('image', 'observation', 'action', 'rnn', 'output'):
+                bnn_method = self._params['policy']['{0}_graph'.format(subgraph_key)].get('bnn_method', None)
+                if bnn_method == 'bootstrap':
+                    num_subgraph_bootstraps += 1
+                    nb = self._params['policy']['{0}_graph'.format(subgraph_key)].get('num_bootstraps', None)
+                    if nb is None or nb != num_bootstraps:
+                        raise Exception('Subgraph {0} does not say it has {1} bootstraps!'.format(subgraph_key, num_bootstraps))
+
+            assert (num_subgraph_bootstraps > 0)
+
+        return num_bootstraps
 
     def _create_model(self):
         policy_class = self._params['policy']['class']
@@ -144,7 +171,14 @@ class EvalOffline(object):
         logger.info('Files successfully loaded: {0:.2f}%'.format(100. * num_load_success /
                                                                  float(num_load_success + num_load_fail)))
 
-        replay_pool = ReplayPool(
+        num_bootstraps = self.num_bootstraps
+        if num_bootstraps is not None:
+            logger.info('Creating {0} bootstraps'.format(num_bootstraps))
+            ReplayPoolClass = lambda **kwargs: BootstrapReplayPool(num_bootstraps, **kwargs)
+        else:
+            ReplayPoolClass = ReplayPool
+
+        replay_pool = ReplayPoolClass(
             env_spec=self._env.spec,
             env_horizon=self._env.horizon,
             N=self._model.N,
@@ -158,10 +192,7 @@ class EvalOffline(object):
             replay_pool_params={}
         )
 
-        curr_len = 0
-        for rollout in rollouts:
-            replay_pool.store_rollout(curr_len, rollout)
-            curr_len += len(rollout['dones'])
+        replay_pool.store_rollouts(0, rollouts)
 
         return replay_pool
 
@@ -169,7 +200,44 @@ class EvalOffline(object):
     ### Train ###
     #############
 
+    def _train_batch_thread(self, *args):
+        batch_size, batch_queue, batch_stop = args
+
+        while True:
+            batch = self._replay_pool.sample(batch_size)
+            while True:
+                if batch_stop.is_set():
+                    break
+
+                try:
+                    batch_queue.put(batch, block=True, timeout=1.)
+                    break
+                except:
+                    continue
+
+            if batch_stop.is_set():
+                break
+
+    def _start_train_batch(self):
+        self._batch_queue = multiprocessing.Queue(maxsize=40)
+        self._batch_stop = multiprocessing.Event()
+
+        self._batch_threads = []
+        for _ in range(10):
+            batch_thread = multiprocessing.Process(target=self._train_batch_thread,
+                                                   args=(self._params['alg']['batch_size'],
+                                                         self._batch_queue,
+                                                         self._batch_stop))
+            batch_thread.daemon = True
+            batch_thread.start()
+            self._batch_threads.append(batch_thread)
+
+    def _stop_train_batch(self):
+        self._batch_stop.set()
+
     def train(self):
+        self._start_train_batch()
+
         logger.info('Training model')
 
         alg_args = self._params['alg']
@@ -180,12 +248,19 @@ class EvalOffline(object):
         log_every_n_steps = int(alg_args['log_every_n_steps'])
         batch_size = alg_args['batch_size']
 
+        timeit.reset()
+        timeit.start('total')
         save_itr = 0
         for step in range(total_steps):
-            steps, observations, actions, rewards, dones, _ = self._replay_pool.sample(batch_size)
+            timeit.start('sample')
+            # steps, observations, actions, rewards, dones, _ = self._replay_pool.sample(batch_size)
+            steps, observations, actions, rewards, dones, _ = self._batch_queue.get()
+            timeit.stop('sample')
+            timeit.start('train')
             self._model.train_step(step, steps=steps, observations=observations,
                                    actions=actions, rewards=rewards, dones=dones,
                                    use_target=True)
+            timeit.stop('train')
 
             ### update target network
             if step > update_target_after_n_steps and step % update_target_every_n_steps == 0:
@@ -197,6 +272,12 @@ class EvalOffline(object):
                 self._model.log()
                 logger.dump_tabular(print_func=logger.info)
 
+                timeit.stop('total')
+                for line in str(timeit).split('\n'):
+                    logger.debug(line)
+                timeit.reset()
+                timeit.start('total')
+
             ### save model
             if step > 0 and step % save_every_n_steps == 0:
                 logger.info('Saving files for itr {0}'.format(save_itr))
@@ -205,6 +286,8 @@ class EvalOffline(object):
 
         ### always save the end
         self._save_train_policy(save_itr)
+
+        self._stop_train_batch()
 
     ################
     ### Evaluate ###
@@ -281,3 +364,5 @@ if __name__ == '__main__':
         if not args.no_eval:
             model.evaluate(None, eval_on_holdout=False)
             model.evaluate(None, eval_on_holdout=True)
+
+        model.close()

@@ -186,6 +186,12 @@ class ReplayPool(object):
                               rollout['env_infos'][i],
                               update_log_stats=False)
 
+    def store_rollouts(self, start_step, rollouts):
+        step = start_step
+        for rollout in rollouts:
+            self.store_rollout(step, rollout)
+            step += len(rollout['dones'])
+
     ########################
     ### Remove from pool ###
     ########################
