@@ -196,10 +196,8 @@ class GCG(object):
 
     def _restore(self):
         self._restore_train_rollouts()
-#        try:
         self._restore_train_policy()
-#        except:
-#            logger.info('Loading train policy failed!')
+
         train_itr = self._get_train_itr()
         inference_itr = self._get_inference_itr()
         assert (train_itr == inference_itr,
