@@ -1,9 +1,11 @@
 import tensorflow as tf
 
 from gcg.policies.tf import rnn_cell
+from gcg.policies.tf.fully_connected import FullyConnected
 from gcg.policies.tf.bnn.concrete_dropout import ConcreteDropout
 from gcg.policies.tf.bnn.bayes_by_backprop import BayesByBackprop
 from gcg.policies.tf.bnn.probabilistic_backprop import PBP_net
+from gcg.policies.tf.bnn.bootstrap.bootstrap import Bootstrap
 
 def convnn(
         inputs,
@@ -92,16 +94,12 @@ def convnn(
 
     output = next_layer_input
     # TODO
-    return output, None
+    return output
 
 
 def fcnn(
         inputs,
         params,
-        dp_masks=None,
-        num_dp=1,
-        dtype=tf.float32,
-        data_format='NCHW',
         scope='fcnn',
         reuse=False,
         is_training=True,
@@ -135,17 +133,9 @@ def fcnn(
 
     hidden_layers = params.get('hidden_layers', [])
     output_dim = params['output_dim']
-    dropout = params.get('dropout', None)
     bnn_method = params.get('bnn_method', None)
-    if bnn_method == 'concrete_dropout' and dropout is None:
-        dropout = 0.1  # rowan's overriding hack (note: specific value not used)
     normalizer = params.get('normalizer', None)
     assert(normalizer is None)
-    if dp_masks is not None or dropout is None:
-        dp_return_masks = None
-    else:
-        dp_return_masks = []
-        distribution = tf.contrib.distributions.Uniform()
 
     dims = hidden_layers + [output_dim]
 
@@ -161,69 +151,53 @@ def fcnn(
 
     with tf.variable_scope(scope, reuse=reuse):
         for i, dim in enumerate(dims):
-            if i == len(dims) - 1:
-                activation = output_activation
-            else:
-                activation = hidden_activation
-
-            num_data = params.get('num_data', None)  # TODO: find a better solution than yaml file to get this value
-            batch_size = params.get('batch_size', None)  # TODO: find a better solution than yaml file to get this value
-            bnn_layer_name = "bnn_{}_{}".format(bnn_method, i)
-            if bnn_method == 'concrete_dropout':
-                input_dim = next_layer_input.get_shape()[1].value
-                concrete_dropout = ConcreteDropout(bnn_layer_name, num_data, input_dim)
-                fc_layer = tf.contrib.layers.fully_connected
-                weight_regularizer_scale = concrete_dropout.get_weight_regularizer_scale()
-            elif bnn_method == 'bayes_by_backprop':
-                bayes_by_backprop = BayesByBackprop(bnn_layer_name, num_data, batch_size)
-                # note: object is callable like a layer, but only assumes a one-time call per instance
-                fc_layer = bayes_by_backprop
-                weight_regularizer_scale = bayes_by_backprop.get_weight_regularizer_scale()
-            elif bnn_method == 'probabilistic_backprop':
-                probabilistic_backprop = PBP_net.PBP_net()  # TODO: can this handle being layer-wise?
-                fc_layer = probabilistic_backprop
-                weight_regularizer_scale = 0.0
-            else:
-                fc_layer = tf.contrib.layers.fully_connected
-                weight_regularizer_scale = 0.5
-
-            next_layer_input = fc_layer(
-                inputs=next_layer_input,
-                num_outputs=dim,
-                activation_fn=activation,
-                normalizer_fn=None,
-                normalizer_params=None,
-                weights_initializer=tf.contrib.layers.xavier_initializer(dtype=dtype),
-                biases_initializer=tf.constant_initializer(0., dtype=dtype),
-                weights_regularizer=tf.contrib.layers.l2_regularizer(weight_regularizer_scale),
-                trainable=trainable)
-
-            if dropout is not None:
-                assert (type(dropout) is float and 0 < dropout and dropout <= 1.0)
-                if dp_masks is not None:
-                    next_layer_input = next_layer_input * dp_masks[i]
+            with tf.variable_scope('l{0}'.format(i)):
+                if i == len(dims) - 1:
+                    activation = output_activation
                 else:
-                    # Shape is not well defined without reshaping
-                    shape = tf.shape(next_layer_input)
-                    if num_dp > 1:
-                        sample = distribution.sample(tf.stack((shape[0] // num_dp, dim)))
-                        sample = tf.concat([sample] * num_dp, axis=0)
+                    activation = hidden_activation
+
+                num_data = params.get('num_data', None)  # TODO: find a better solution than yaml file to get this value
+                batch_size = params.get('batch_size', None)  # TODO: find a better solution than yaml file to get this value
+
+                if bnn_method == 'concrete_dropout':
+                    if i < len(dims) - 1: # TODO logic is not always right
+                        fc_layer = ConcreteDropout
+                        fc_layer_args = {'num_data': num_data}
                     else:
-                        sample = distribution.sample(shape)
-                    sample = tf.reshape(sample, (-1, dim))
-                    if bnn_method == 'concrete_dropout':
-                        next_layer_input, mask = concrete_dropout.apply_soft_dropout_mask(next_layer_input, sample)
-                    else:
-                        mask = tf.cast(sample < dropout, dtype) / dropout
-                        next_layer_input = next_layer_input * mask
-                    dp_return_masks.append(mask)
+                        fc_layer = FullyConnected
+                        fc_layer_args = {}
+                elif bnn_method == 'bayes_by_backprop':
+                    fc_layer = BayesByBackprop
+                    fc_layer_args = {'num_data': num_data, 'batch_size': batch_size}
+                # elif bnn_method == 'probabilistic_backprop':
+                #     probabilistic_backprop = PBP_net.PBP_net()  # TODO: can this handle being layer-wise?
+                #     fc_layer = probabilistic_backprop
+                #     weight_regularizer_scale = 0.0
+                elif bnn_method == 'bootstrap':
+                    fc_layer = Bootstrap
+                    fc_layer_args = {'num_bootstraps': params['num_bootstraps']}
+                elif bnn_method is not None:
+                    raise NotImplementedError(bnn_method)
+                else:
+                    fc_layer = FullyConnected
+                    fc_layer_args = {}
+
+                fc_layer_call_fn = fc_layer(
+                    num_inputs=next_layer_input.get_shape()[1].value,
+                    num_outputs=dim,
+                    activation_fn=activation,
+                    trainable=trainable,
+                    **fc_layer_args)
+
+                next_layer_input = fc_layer_call_fn(next_layer_input)
 
         output = next_layer_input
 
         if T is not None:
             output = tf.reshape(output, (-1, T, output.get_shape()[-1].value))
 
-    return output, dp_return_masks
+    return output
 
 
 
@@ -231,8 +205,6 @@ def rnn(
         inputs,
         params,
         initial_state=None,
-        dp_masks=None,
-        num_dp=1,
         dtype=tf.float32,
         scope='rnn',
         reuse=False):
@@ -278,44 +250,20 @@ def rnn(
 
     if initial_state is None:
         num_units = params['num_units']
-    dropout = params.get('dropout', None)
-    if dp_masks is not None or dropout is None:
-        dp_return_masks = None
-    else:
-        dp_return_masks = []
-        distribution = tf.contrib.distributions.Uniform()
     cells = []
 
     with tf.variable_scope(scope, reuse=reuse):
         for i in range(num_cells):
-            if dropout is not None:
-                assert (type(dropout) is float and 0 < dropout and dropout <= 1.0)
-                if dp_masks is not None:
-                    dp = dp_masks[i]
-                else:
-                    if num_dp > 1:
-                        sample = distribution.sample(tf.stack((tf.shape(inputs)[0] // num_dp, num_units)))
-                        sample = tf.concat([sample] * num_dp, axis=0)
-                    else:
-                        sample = distribution.sample((tf.shape(inputs)[0], num_units))
-                    # Shape is not well defined without reshaping
-                    sample = tf.reshape(sample, (-1, num_units))
-                    mask = tf.cast(sample < dropout, dtype) / dropout
-                    dp = mask
-                    dp_return_masks.append(mask)
-            else:
-                dp = None
-
             if i == 0:
-                num_inputs = inputs.get_shape()[-1]
+                num_inputs = inputs.get_shape()[-1].value
             else:
                 num_inputs = num_units
+
             if cell_type == tf.contrib.rnn.LayerNormBasicLSTMCell:
                 cell = cell_type(num_units, **cell_args)
             else:
                 cell = cell_type(
                     num_units,
-                    dropout_mask=dp,
                     dtype=dtype,
                     num_inputs=num_inputs,
                     weights_scope='{0}_{1}'.format(params['cell_type'], i),
@@ -331,4 +279,4 @@ def rnn(
             dtype=dtype,
             time_major=False)
 
-    return outputs, dp_return_masks
+    return outputs

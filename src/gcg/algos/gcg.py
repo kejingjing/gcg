@@ -13,6 +13,7 @@ class GCG(object):
     def __init__(self, **kwargs):
 
         self._save_dir = kwargs['save_dir']
+        self._load_dir = kwargs['load_dir']
         self._env = kwargs['env']
         self._policy = kwargs['policy']
 
@@ -86,6 +87,12 @@ class GCG(object):
 
     def _inference_policy_file_name(self, itr):
         return os.path.join(self._save_dir, 'itr_{0:04d}_inference_policy.ckpt'.format(itr))
+
+    def _load_train_policy_file_name(self, itr):
+        return os.path.join(self._load_dir, 'itr_{0:04d}_train_policy.ckpt'.format(itr))
+
+    def _load_inference_policy_file_name(self, itr):
+        return os.path.join(self._load_dir, 'itr_{0:04d}_inference_policy.ckpt'.format(itr))
 
     ############
     ### Save ###
@@ -166,12 +173,12 @@ class GCG(object):
         :return: iteration that it is currently on
         """
         itr = 0
-        while len(glob.glob(self._train_policy_file_name(itr) + '*')) > 0:
+        while len(glob.glob(os.path.splitext(self._load_train_policy_file_name(itr))[0] + '*')) > 0:
             itr += 1
 
         if itr > 0:
-            logger.info('Loading train policy from iteration {0}...'.format(itr - 1))
-            self._policy.restore(self._train_policy_file_name(itr - 1), train=True)
+            logger.info('Loading train policy from {0} iteration {1}...'.format(self._load_dir, itr - 1))
+            self._policy.restore(self._load_train_policy_file_name(itr - 1), train=True)
             logger.info('Loaded train policy!')
 
     def _restore_inference_policy(self):
@@ -179,12 +186,12 @@ class GCG(object):
         :return: iteration that it is currently on
         """
         itr = 0
-        while len(glob.glob(self._inference_policy_file_name(itr) + '*')) > 0:
+        while len(glob.glob(self._load_inference_policy_file_name(itr) + '*')) > 0:
             itr += 1
 
         if itr > 0:
             logger.info('Loading inference policy from iteration {0}...'.format(itr - 1))
-            self._policy.restore(self._inference_policy_file_name(itr - 1), train=False)
+            self._policy.restore(self._load_inference_policy_file_name(itr - 1), train=False)
             logger.info('Loaded inference policy!')
 
     def _restore(self):
@@ -294,6 +301,8 @@ def run_gcg(params):
     assert (os.path.exists(data_dir))
     save_dir = os.path.join(data_dir, params['exp_name'])
     os.makedirs(save_dir, exist_ok=True)
+    load_dir = os.path.join(data_dir, params.get('load_policy', params['exp_name']))
+    assert (os.path.exists(load_dir))
     logger.setup(display_name=params['exp_name'],
                  log_path=os.path.join(save_dir, 'log.txt'),
                  lvl=params['log_level'])
@@ -341,6 +350,7 @@ def run_gcg(params):
         max_path_length = env.horizon
     algo = GCG(
         save_dir=save_dir,
+        load_dir=load_dir,
         env=env,
         env_eval=env_eval,
         policy=policy,

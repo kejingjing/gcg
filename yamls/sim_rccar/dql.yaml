@@ -1,4 +1,4 @@
-exp_name: sim_rccar/simple_cluttered_dql
+exp_name: sim_rccar/forest_speed_dql
 seed: 0
 log_level: debug
 
@@ -9,8 +9,8 @@ log_level: debug
 alg:
 
   ### Environment ###
-  env: "SimpleRoomClutteredEnv(params={'hfov': 120, 'do_back_up': False, 'collision_reward': -1., 'speed_limits': [2., 2.], 'visualize': False})"
-  env_eval: "SimpleRoomClutteredEnv(params={'hfov': 120, 'do_back_up': False, 'collision_reward': -1., 'speed_limits': [2., 2.], 'visualize': False})"
+  env: "ForestEnv(params={'use_vel': False})"
+  env_eval: "ForestEnv(params={'use_vel': False})"
   n_envs: 1 # number of training environments
   render: False
   
@@ -101,6 +101,7 @@ policy:
     conv_activation: relu # <relu>
     output_activation: relu # <relu/tanh/sigmoid/softmax>
     normalizer: # <layer_norm/weight_norm/batch_norm>
+
     batch_norm_decay: 0.9
 
   observation_graph: # fully connected
@@ -142,7 +143,7 @@ policy:
 
   # device
   gpu_device: 0
-  gpu_frac: 0.3
+  gpu_frac: 0.4
  
   class: GCGPolicy # <GCGPolicy> model class
   GCGPolicy: &idGCGPolicy

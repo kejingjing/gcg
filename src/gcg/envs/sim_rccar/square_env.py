@@ -5,7 +5,6 @@ from gcg.envs.sim_rccar.cylinder_env import CylinderEnv
 class SquareEnv(CylinderEnv):
 
     def __init__(self, params={}):
-        params.setdefault('do_back_up', True)
         params.setdefault('back_up', {
             'steer': [-5., 5.],
             'vel': -1.,

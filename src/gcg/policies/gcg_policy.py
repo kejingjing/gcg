@@ -188,7 +188,7 @@ class GCGPolicy(object):
                 layer = tf.reshape(layer, [-1] + list(self._obs_im_shape))
                 # [batch_size * hist_len, height, width, channels]
 
-                layer, _ = networks.convnn(layer, self._image_graph, is_training=is_training, global_step_tensor=self.global_step)
+                layer = networks.convnn(layer, self._image_graph, is_training=is_training, global_step_tensor=self.global_step)
                 layer = layers.flatten(layer)
                 # pass through cnn to get [batch_size * hist_len, ??]
 
@@ -201,11 +201,12 @@ class GCGPolicy(object):
                 if tf_obs_vec_ph.get_shape()[1].value > 0:
                     layer = tf.concat([layer, tf.reshape(tf_obs_vec_ph, [-1, self._obs_history_len * self._obs_vec_dim])], axis=1)
 
-                tf_obs_lowd, _ = networks.fcnn(layer, self._observation_graph, is_training=is_training, global_step_tensor=self.global_step)
+                self._observation_graph.update({'batch_size': tf.shape(layer)[0]})
+                tf_obs_lowd = networks.fcnn(layer, self._observation_graph, is_training=is_training, global_step_tensor=self.global_step)
 
         return tf_obs_lowd
 
-    def _graph_inference(self, tf_obs_lowd, inputs, goals, tf_actions_ph, is_training, num_dp=1, N=None):
+    def _graph_inference(self, tf_obs_lowd, inputs, goals, tf_actions_ph, is_training, N=None):
         """
         :param tf_obs_lowd: [batch_size, self._rnn_state_dim]
         :param tf_actions_ph: [batch_size, H, action_dim]
@@ -219,19 +220,21 @@ class GCGPolicy(object):
 
         with tf.variable_scope(self._action_scope):
             self._action_graph.update({'output_dim': self._observation_graph['output_dim']})
-            rnn_inputs, _ = networks.fcnn(tf_actions_ph, self._action_graph, is_training=is_training,
-                                          T=H, global_step_tensor=self.global_step, num_dp=num_dp)
+            self._action_graph.update({'batch_size': batch_size})
+            rnn_inputs = networks.fcnn(tf_actions_ph, self._action_graph, is_training=is_training,
+                                          T=H, global_step_tensor=self.global_step)
 
         with tf.variable_scope(self._rnn_scope):
-            rnn_outputs, _ = networks.rnn(rnn_inputs, self._rnn_graph, initial_state=tf_obs_lowd, num_dp=num_dp)
+            self._rnn_graph['cell_args'].update({'batch_size': batch_size})
+            rnn_outputs = networks.rnn(rnn_inputs, self._rnn_graph, initial_state=tf_obs_lowd)
 
         with tf.variable_scope(self._output_scope):
             self._output_graph.update({'output_dim': self._output_dim})
             self._output_graph.update({'batch_size': batch_size})
-            tf_pre_yhats, _ = networks.fcnn(rnn_outputs, self._output_graph, is_training=is_training, scope='fcnn_yhats',
-                                                T=H, global_step_tensor=self.global_step, num_dp=num_dp)
-            tf_pre_bhats, _ = networks.fcnn(rnn_outputs, self._output_graph, is_training=is_training, scope='fcnn_bhats',
-                                               T=H, global_step_tensor=self.global_step, num_dp=num_dp)
+            tf_pre_yhats = networks.fcnn(rnn_outputs, self._output_graph, is_training=is_training, scope='fcnn_yhats',
+                                                T=H, global_step_tensor=self.global_step)
+            tf_pre_bhats = networks.fcnn(rnn_outputs, self._output_graph, is_training=is_training, scope='fcnn_bhats',
+                                               T=H, global_step_tensor=self.global_step)
 
         pre_yhats = OrderedDict()
         for i, key in enumerate(self._output_keys):
@@ -625,7 +628,7 @@ class GCGPolicy(object):
     def _graph_setup_savers(self, tf_preopt_vars, tf_postopt_vars, inference_only):
         savers_dict = dict()
 
-        savers_dict['inference'] = tf.train.Saver(set(tf_postopt_vars) - set(tf_preopt_vars), max_to_keep=None)
+        savers_dict['inference'] = tf.train.Saver(tf_preopt_vars, max_to_keep=None)
 
         if not inference_only:
             def filter_policy_vars(must_contain):

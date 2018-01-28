@@ -1,4 +1,4 @@
-exp_name: sim_rccar/simple_cluttered_coll_heading
+exp_name: sim_rccar/forest_coll_heading
 seed: 0
 log_level: debug
 
@@ -9,8 +9,8 @@ log_level: debug
 alg:
 
   ### Environment ###
-  env: "SimpleRoomClutteredEnv(params={'hfov': 120, 'do_back_up': False, 'collision_reward': -1., 'speed_limits': [2., 2.], 'visualize': False})"
-  env_eval: "SimpleRoomClutteredEnv(params={'hfov': 120, 'do_back_up': False, 'collision_reward': -1., 'speed_limits': [2., 2.], 'visualize': False})"
+  env: "ForestEnv(params={'speed_limits': [2., 2.]})"
+  env_eval: "ForestEnv(params={'speed_limits': [2., 2.]})"
   n_envs: 1 # number of training environments
   render: False
   
