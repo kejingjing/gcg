@@ -114,6 +114,14 @@ class EvalOffline(object):
         os.makedirs(dir, exist_ok=True)
         return dir
 
+    @property
+    def _eval_train_rollouts_file_name(self):
+        return os.path.join(self._eval_train_dir, 'eval_rollouts.pkl')
+
+    @property
+    def _eval_holdout_rollouts_file_name(self):
+        return os.path.join(self._eval_holdout_dir, 'eval_rollouts.pkl')
+
     #############
     ### Model ###
     #############
@@ -308,47 +316,66 @@ class EvalOffline(object):
     ### Evaluate ###
     ################
 
-    def evaluate(self, plotter, eval_on_holdout=False):
-        logger.info('Evaluating model on {0}'.format('holdout' if eval_on_holdout else 'train'))
+    def _eval_pred_all(self, eval_on_holdout):
+        pkl_file_name = self._eval_train_rollouts_file_name if not eval_on_holdout else self._eval_holdout_rollouts_file_name
 
+        if os.path.exists(pkl_file_name):
+            logger.info('Load evaluation rollouts for {0}'.format('holdout' if eval_on_holdout else 'train'))
+            d = mypickle.load(pkl_file_name)
+        else:
+            logger.info('Evaluating model on {0}'.format('holdout' if eval_on_holdout else 'train'))
 
-        replay_pool = self._replay_holdout_pool if eval_on_holdout else self._replay_pool
+            replay_pool = self._replay_holdout_pool if eval_on_holdout else self._replay_pool
 
-        # get collision idx in obs_vec
-        vec_spec = self._env.observation_vec_spec
-        obs_vec_start_idxs = np.cumsum([space.flat_dim for space in vec_spec.values()]) - 1
-        coll_idx = obs_vec_start_idxs[list(vec_spec.keys()).index('coll')]
+            # get collision idx in obs_vec
+            vec_spec = self._env.observation_vec_spec
+            obs_vec_start_idxs = np.cumsum([space.flat_dim for space in vec_spec.values()]) - 1
+            coll_idx = obs_vec_start_idxs[list(vec_spec.keys()).index('coll')]
 
-        # model will be evaluated on 1e3 inputs at a time (accounting for bnn samples)
-        batch_size = 1000 // self._num_bnn_samples
-        assert (batch_size > 1)
-        rp_gen = replay_pool.sample_all_generator(batch_size=batch_size, include_env_infos=True)
+            # model will be evaluated on 1e3 inputs at a time (accounting for bnn samples)
+            batch_size = 1000 // self._num_bnn_samples
+            assert (batch_size > 1)
+            rp_gen = replay_pool.sample_all_generator(batch_size=batch_size, include_env_infos=True)
 
-        # keep everything in dict d
-        d = defaultdict(list)
-        for steps, (observations_im, observations_vec), actions, rewards, dones, env_infos in rp_gen:
-            observations = (observations_im[:, :self._model.obs_history_len, :],
-                            observations_vec[:, :self._model.obs_history_len, :])
-            coll_labels = (np.cumsum(observations_vec[:, self._model.obs_history_len:, coll_idx], axis=1) >= 1.).astype(float)
+            # keep everything in dict d
+            d = defaultdict(list)
+            for steps, (observations_im, observations_vec), actions, rewards, dones, env_infos in rp_gen:
+                observations = (observations_im[:, :self._model.obs_history_len, :],
+                                observations_vec[:, :self._model.obs_history_len, :])
+                coll_labels = (np.cumsum(observations_vec[:, self._model.obs_history_len:, coll_idx], axis=1) >= 1.).astype(float)
 
-            observations_repeat = (np.repeat(observations[0], self._num_bnn_samples, axis=0),
-                                   np.repeat(observations[1], self._num_bnn_samples, axis=0))
-            actions_repeat = np.repeat(actions, self._num_bnn_samples, axis=0)
+                observations_repeat = (np.repeat(observations[0], self._num_bnn_samples, axis=0),
+                                       np.repeat(observations[1], self._num_bnn_samples, axis=0))
+                actions_repeat = np.repeat(actions, self._num_bnn_samples, axis=0)
 
-            yhats, bhats = self._model.get_model_outputs(observations_repeat, actions_repeat)
-            coll_preds = np.reshape(yhats['coll'], (len(steps), self._num_bnn_samples, -1))
+                yhats, bhats = self._model.get_model_outputs(observations_repeat, actions_repeat)
+                coll_preds = np.reshape(yhats['coll'], (len(steps), self._num_bnn_samples, -1))
 
-            d['coll_labels'].append(coll_labels)
-            d['coll_preds'].append(coll_preds)
-            d['env_infos'].append(env_infos)
-            # Note: you can save more things (e.g. actions) if you want to do something with them later
+                d['coll_labels'].append(coll_labels)
+                d['coll_preds'].append(coll_preds)
+                d['env_infos'].append(env_infos)
+                d['dones'].append(dones)
+                # Note: you can save more things (e.g. actions) if you want to do something with them later
 
-        for k, v in d.items():
-            d[k] = np.concatenate(v)
+            for k, v in d.items():
+                d[k] = np.concatenate(v)
+
+            mypickle.dump(d, pkl_file_name)
+
+        return d
+
+    def evaluate(self):
+        d_train = self._eval_pred_all(eval_on_holdout=False)
+        d_holdout = self._eval_pred_all(eval_on_holdout=True)
 
         # import IPython; IPython.embed()
-        plotter = BnnPlotter(d['coll_preds'], d['coll_labels'])
-        plotter.save_all_plots(self._eval_holdout_dir if eval_on_holdout else self._eval_train_dir)
+        plotter = BnnPlotter(d_train['coll_preds'], d_train['coll_labels'],
+                             train_preds=d_train['coll_preds'], dones=d_train['dones'])
+        plotter.save_all_plots(self._eval_train_dir, plot_types=['plot_online_decision'])
+
+        plotter = BnnPlotter(d_holdout['coll_preds'], d_holdout['coll_labels'],
+                             train_preds=d_train['coll_preds'], dones=d_holdout['dones'])
+        plotter.save_all_plots(self._eval_holdout_dir, plot_types=['plot_online_decision'])
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
@@ -373,7 +400,6 @@ if __name__ == '__main__':
             model.train()
 
         if not args.no_eval:
-            model.evaluate(None, eval_on_holdout=False)
-            model.evaluate(None, eval_on_holdout=True)
+            model.evaluate()
 
         model.close()
