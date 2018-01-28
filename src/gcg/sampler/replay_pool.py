@@ -128,8 +128,9 @@ class ReplayPool(object):
         self._actions[self._index, :] = self._env_spec.action_space.flatten(action) if flatten_action else action
         self._rewards[self._index] = reward
         if self._dones[self._index] and not done:
-            self._done_indices.remove(self._index)
             assert(self._curr_size + 1 >= self._size)
+            if self._index in self._done_indices:
+                self._done_indices.remove(self._index)
         if done:
             self._done_indices.append(self._index)
         self._dones[self._index] = done
@@ -206,7 +207,13 @@ class ReplayPool(object):
         r_len = (self._index - self._last_done_index) % self._size
         if self._curr_size < self._size - 1: # TODO: not sure this is right
             self._curr_size -= r_len
+        
+        for index in range(self._last_done_index, self._index):
+            if index in self._done_indices:
+                self._done_indices.remove(index)
+        
         self._index = self._last_done_index
+
 
         return r_len
 

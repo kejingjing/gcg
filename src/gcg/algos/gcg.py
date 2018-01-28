@@ -138,14 +138,14 @@ class GCG(object):
 
     def _get_train_itr(self):
         train_itr = 0
-        while len(glob.glob(self._inference_policy_file_name(train_itr) + '*')) > 0:
+        while len(glob.glob(os.path.splitext(self._inference_policy_file_name(train_itr))[0] + '*')) > 0:
             train_itr += 1
 
         return train_itr
 
     def _get_inference_itr(self):
         inference_itr = 0
-        while os.path.exists(self._train_rollouts_file_name(inference_itr)):
+        while len(glob.glob(os.path.splitext(self._train_policy_file_name(inference_itr))[0] + '*')) > 0:
             inference_itr += 1
 
         return inference_itr
@@ -186,7 +186,7 @@ class GCG(object):
         :return: iteration that it is currently on
         """
         itr = 0
-        while len(glob.glob(self._load_inference_policy_file_name(itr) + '*')) > 0:
+        while len(glob.glob(os.path.splitext(self._load_inference_policy_file_name(itr))[0] + '*')) > 0:
             itr += 1
 
         if itr > 0:
