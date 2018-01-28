@@ -217,7 +217,7 @@ class EvalOffline(object):
     ### Evaluate ###
     ################
 
-    def evaluate(self, eval_on_holdout=False, comparison_data={}):
+    def evaluate(self, eval_on_holdout=False, comparison_plotter=None):
         logger.info('Evaluating model')
 
         if eval_on_holdout:
@@ -264,12 +264,15 @@ class EvalOffline(object):
 
         # d['coll_preds'] has shape (num_replays, self._num_bnn_samples, horizon)
         # d['coll_labels'] has shape (num_replays, horizon)
-        plotter = BnnPlotter(preds=d['coll_preds'], labels=d['coll_labels'], comparison_data=comparison_data)
+        plotter = BnnPlotter(preds=d['coll_preds'], labels=d['coll_labels'], env=env, env_infos=d['env_infos'],
+                             comparison_plotter=comparison_plotter)
         logger.info('Saving evaluation plots to {}'.format(self._save_dir))
         plotter.save_all_evaluation_plots(self._save_dir, env_name=env_name)
-        plotter.save_map_uncertainty_plot(self._save_dir, env_name=env_name, env=env, env_infos=d['env_infos'])
-        return plotter.comparison_data
+        plotter.save_map_uncertainty_plot(self._save_dir, env_name=env_name)
+        if comparison_plotter is not None:
+            plotter.save_comparitive_decisions(self._save_dir)
         # import IPython; IPython.embed()
+        return plotter
 
 
 if __name__ == '__main__':
@@ -295,6 +298,6 @@ if __name__ == '__main__':
             model.train()
 
         if not args.no_eval:
-            comparison_data = model.evaluate(eval_on_holdout=False)
-            comparison_data = model.evaluate(eval_on_holdout=True, comparison_data=comparison_data)
+            plotter_training = model.evaluate(eval_on_holdout=False)
+            plotter_holdout = model.evaluate(eval_on_holdout=True, comparison_plotter=plotter_training)
     # import IPython; IPython.embed()

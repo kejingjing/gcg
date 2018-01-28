@@ -16,12 +16,12 @@ class BayesByBackprop(object):
     def _make_positive(x):
             return tf.nn.softplus(x)
 
-    def _get_weights_or_biases_and_regularize(self, shape, mu_initializer, regularizer, str_weights_or_biases):
+    def _get_weights_or_biases_and_regularize(self, batch_size, shape, mu_initializer, regularizer, str_weights_or_biases):
         tensor_name = "{}-{}".format(self.layer_name, str_weights_or_biases)
         mu = tf.get_variable(tensor_name + '_mu', shape=shape, initializer=mu_initializer)
         rho = tf.get_variable(tensor_name + '_rho', initializer=tf.constant(0.1, shape=shape))
         sigma = BayesByBackprop._make_positive(rho)
-        noise_sample = tf.random_normal(shape)
+        noise_sample = tf.random_normal([batch_size] + shape)
 
         weights_or_biases = mu + sigma * noise_sample
 
@@ -47,24 +47,25 @@ class BayesByBackprop(object):
                  weights_initializer=None, weights_regularizer=None, biases_initializer=None, biases_regularizer=None,
                  trainable=True):
         # TODO: sort out normalisers...I don't use them yet.
+        batch_size = tf.shape(inputs)[0]
 
-        # weights
+        # weights, shape: [batch_size, dim_input, dim_output]
         weights_shape = [inputs.get_shape()[1].value, num_outputs]
         if weights_initializer is None:
             weights_initializer = tf.truncated_normal(weights_shape, stddev=0.01)
-        weights = self._get_weights_or_biases_and_regularize(weights_shape, weights_initializer, weights_regularizer,
+        weights = self._get_weights_or_biases_and_regularize(batch_size, weights_shape, weights_initializer, weights_regularizer,
                                                              'weights')
 
-        # biases
+        # biases, shape: [batch_size, dim_outputs]
         biases_shape = [num_outputs]
         if biases_regularizer is None:
             biases_regularizer = weights_regularizer
             # biases_initializer = tf.constant(0.0, shape=biases_shape)
-        biases = self._get_weights_or_biases_and_regularize(biases_shape, biases_initializer, biases_regularizer,
+        biases = self._get_weights_or_biases_and_regularize(batch_size, biases_shape, biases_initializer, biases_regularizer,
                                                             'biases')
 
-        # the layer
-        fc_layer_out = tf.matmul(inputs, weights) + biases
+        # the layer, inputs shape: [?, dim_inputs]
+        fc_layer_out = tf.reduce_sum(inputs[:,:,None] * weights, axis=1) + biases  # shape [?, num_outputs]
         if activation_fn is not None:
             fc_layer_out = activation_fn(fc_layer_out)
 

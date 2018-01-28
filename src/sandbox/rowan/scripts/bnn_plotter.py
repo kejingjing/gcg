@@ -1,12 +1,11 @@
 import matplotlib.pyplot as plt
-import matplotlib.cm as cm
 import numpy as np
 import os
 
 
 class BnnPlotter(object):
 
-    def __init__(self, preds, labels, comparison_data={}):
+    def __init__(self, preds, labels, env=None, env_infos=None, comparison_plotter=None):
         """
         preds: num_replays x num_bnn_samples x action_len-1
         labels: num_replays x action_len
@@ -14,12 +13,17 @@ class BnnPlotter(object):
         """
         self.preds = preds
         self.labels = labels
-        self.comparison_data = comparison_data
+        self.env = env
+        self.env_infos = env_infos
+        self.comparison_plotter = comparison_plotter
         self.num_replays = preds.shape[0]
         self.num_bnn_samples = preds.shape[1]
         self.num_time_steps_pred = preds.shape[2]
         self.num_time_steps_replay = labels.shape[1]
         assert preds.shape[0] == labels.shape[0]
+
+        self.sigma_percentiles = None
+        self.map_uncertainties = None
 
     def save_all_evaluation_plots(self, dir, env_name="UnknownEnv"):
         plot_types = ['plot_hist_individual_predictions',
@@ -176,17 +180,15 @@ class BnnPlotter(object):
         plt.ylabel("Sigma Probability of Collision")
         return fig, ax
 
-    def plot_map_uncertainty(self, env=None, env_infos=None):
-        """
-        env_infos: num_replays x action_len-1
-        :return:
-        """
+    def _compute_map_uncertainties(self):
+        if self.map_uncertainties is not None:
+            return
         max_num_replays = 100000
-        num_replays = len(env_infos)
+        num_replays = len(self.env_infos)  # env_infos: num_replays x action_len-1
         num_replays = min(num_replays, max_num_replays)
         xs, ys, us = [], [] ,[]
         for i in range(num_replays):
-            info = env_infos[i, 0]
+            info = self.env_infos[i, 0]
             if not info:  # is empty after a collision
                 continue
             pred_sigma = np.sqrt(np.sum(np.var(self.preds[i], axis=0)))  # num_replays
@@ -196,23 +198,71 @@ class BnnPlotter(object):
             ys.append(y)
             us.append(pred_sigma)  # uncertainties
 
-        # normalise roughly between 0 and 1
+        xs = np.array(xs)
+        ys = np.array(ys)
+        us = np.array(us)
+        self.map_uncertainties = {'xs': xs, 'ys': ys, 'us': us}
+
         low = np.percentile(us, 10)
         high = np.percentile(us, 90)
-        if self.comparison_data.get('percentiles', None) is None:
-            self.comparison_data['percentiles'] = {'low': low, 'high': high}
-        us -= self.comparison_data['percentiles']['low']
-        us /= self.comparison_data['percentiles']['high']
+        self.sigma_percentiles = {'min': np.min(us), 'low': low, 'high': high, 'max': np.max(us)}
 
-        colors = cm.rainbow(us)
+    def plot_map_uncertainty(self):
+        """
+        env_infos: num_replays x action_len-1
+        :return:
+        """
+        self._compute_map_uncertainties()
+        xs, ys, us = [self.map_uncertainties[i] for i in ['xs', 'ys', 'us']]
+
+        # normalise roughly between 0 and 1
+        if self.comparison_plotter is None:
+            sigma_percentiles = self.sigma_percentiles
+        else:
+            sigma_percentiles = self.comparison_plotter.sigma_percentiles
+
+        cm = plt.cm.get_cmap('coolwarm')
         fig, ax = plt.subplots(1, 1, figsize=(20, 16))
-        ax.scatter(xs, ys, color=colors, alpha=0.3)
-        if hasattr(env, 'cone_positions'):
-            cone_positions = np.array(env.cone_positions)  # num_cones x 3 (xyz)
+        sc = ax.scatter(xs, ys, c=us, vmin=0, vmax=sigma_percentiles['high'], alpha=0.5, cmap=cm)
+        if hasattr(self.env, 'cone_positions'):
+            cone_positions = np.array(self.env.cone_positions)  # num_cones x 3 (xyz)
             ax.scatter(cone_positions[:,0], cone_positions[:,1], color='black', s=100)
-        title = "Predictive time-to-collision-uncertainty (purple more certain, red more uncertain). " \
-                "Sigma range [{0:.6f}, {0:.6f}]"
-        plt.title(title.format(low, high))
+        title = "Predictive time-to-collision-uncertainty (blue = more certain, red = more uncertain). " \
+                "Sigma range [{0:.6f}, {1:.6f}]"
+        plt.title(title.format(self.sigma_percentiles['low'], self.sigma_percentiles['high']))
         plt.xlabel("X position")
         plt.ylabel("Y position")
+        plt.colorbar(sc)
         return fig, ax
+
+    def save_comparitive_decisions(self, dir):
+        self._compute_map_uncertainties()
+        self.comparison_plotter._compute_map_uncertainties()
+
+        sigmas = []
+        for plotter in [self, self.comparison_plotter]:
+            for key in ['low', 'high', 'max']:
+                sigmas.append(plotter.sigma_percentiles[key])
+        sigmas.sort()
+        sigma_decision_thresholds = []
+        for i in range(len(sigmas)-1):
+            sigma_decision_thresholds.append(np.linspace(sigmas[i], sigmas[i+1], 5))
+        sigma_decision_thresholds = np.array(sigma_decision_thresholds).flatten()
+        assert len(sigma_decision_thresholds) <= 1000  # don't save too many files by mistake
+
+        cm = plt.cm.get_cmap('coolwarm')
+        for i_sigma, sigma in enumerate(sigma_decision_thresholds):
+            fig, axs = plt.subplots(1, 2, sharex=True, sharey=True, figsize=(20, 16))
+            axs[0].set_title("TrainingData. Blue = fine, Red = need help. Sigma threshold {0:.5f}".format(sigma))
+            axs[1].set_title("HoldoutData. Blue = fine, Red = need help. Sigma threshold {0:.5f}".format(sigma))
+            for i, plotter in enumerate([self.comparison_plotter, self]):
+                us_thresholded = np.where(plotter.map_uncertainties['us'] < sigma, 0., 1.)
+                axs[i].scatter(plotter.map_uncertainties['xs'], plotter.map_uncertainties['ys'],
+                                    c=us_thresholded, vmin=0., vmax=1., alpha=0.1, cmap=cm)
+                if hasattr(plotter.env, 'cone_positions'):
+                    cone_positions = np.array(plotter.env.cone_positions)  # num_cones x 3 (xyz)
+                    axs[i].scatter(cone_positions[:,0], cone_positions[:,1], color='black', s=100)
+                axs[i].set_xlabel("X position")
+                axs[i].set_ylabel("Y position")
+            fig_name = 'comparitive_decisions{}'.format(i_sigma)
+            self._save_fig(fig, dir, fig_name)

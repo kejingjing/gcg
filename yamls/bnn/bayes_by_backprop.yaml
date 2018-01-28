@@ -8,8 +8,8 @@ log_level: debug
 offline:
   # all paths are relative to gcg/data
   data: bnn/datasets/SquareClutteredEnv_random30000
-#  data_holdout: bnn/datasets/SquareClutteredConeEnv_random30000
-  data_holdout: old/offline/holdout_data3  # Greg's translated pickle file from the coloured walls env
+  data_holdout: bnn/datasets/SquareClutteredConeEnv_random30000
+#  data_holdout: old/offline/holdout_data3  # Greg's translated pickle file from the coloured walls env
 
   init_checkpoint: bnn/deterministic/itr_0024_train_policy.ckpt
   init_restore: ['image', 'observation', 'action', 'rnn'] # what parts of graph to restore? given as a list which may contain ['train', 'image', 'observation', 'action', 'rnn', 'output']
