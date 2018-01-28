@@ -48,11 +48,11 @@ class BnnPlotter(object):
         fig, axs = plt.subplots(num_replays_to_plot, self.num_time_steps_pred,
                                 sharex=True, sharey=True, tight_layout=False, figsize=(18, 10))
         for i_replay in range(num_replays_to_plot):
-            i_coll = np.random.randint(0, self.num_replays)
+            i_sample = np.random.randint(self.num_replays)
             for i_time in range(self.num_time_steps_pred):
                 ax = axs[i_replay, i_time]
-                x = self.preds[i_coll, :, i_time]
-                color = 'b' if self.labels[i_coll, i_time] == 0 else 'r'
+                x = self.preds[i_sample, :, i_time]
+                color = 'b' if self.labels[i_sample, i_time] == 0 else 'r'
                 ax.hist(x, 20, range=(0.,1.), color=color)
                 if i_replay == num_replays_to_plot - 1:
                     ax.set_xlabel("t = {}".format(i_time))
@@ -92,13 +92,36 @@ class BnnPlotter(object):
 
 
     def plot_hist_time_to_collision(self):
-        truth = self.num_time_steps_replay - np.sum(self.labels, axis=1)  # num_replays
-        pred = self.num_time_steps_pred - np.sum(np.mean(self.preds, axis=1), axis=1)  # num_replays
-        pred_minus_truth = pred - truth
-        fig, ax = plt.subplots(1, 1)
-        ax.hist(pred_minus_truth, 20)
-        plt.xlabel("time steps (relative)")
-        plt.title("predicted minus truth of time step collided")
+        truth = self.num_time_steps_replay - self.labels.sum(axis=1)  # num_replays
+        pred = self.num_time_steps_pred - self.preds.mean(axis=1).sum(axis=1)  # num_replays
+        pred_std = self.preds.std(axis=1).mean(axis=1)
+
+        num_bins = 20
+        counts, bin_edges = np.histogram(pred - truth, bins=num_bins)
+        bin_centers = 0.5 * (bin_edges[1:] + bin_edges[:-1])
+        bin_indices = np.clip(np.digitize(pred - truth, bin_edges) - 1, 0, num_bins - 1) # TODO might be off by one?
+
+        counts_std = []
+        for i in range(num_bins):
+            bin_indices_i = [bin_indices == i][0]
+            if max(bin_indices_i) == False:
+                counts_std.append(0)
+            else:
+                counts_std.append(pred_std[bin_indices_i].mean())
+        counts_std = np.asarray(counts_std)
+
+        fig, axes = plt.subplots(1, 2, figsize=(12, 4))
+        y = counts / counts.sum()
+        width = 0.9 * ((bin_edges.max() - bin_edges.min()) / num_bins)
+        axes[0].bar(bin_centers, counts, width=width, color='b')
+        axes[1].bar(bin_centers, counts_std, width=0.25 * width, color='r')
+
+        for ax in axes:
+            ax.set_xlabel("time steps (relative)")
+        axes[0].set_title("predicted minus truth of time step collided (mean)")
+        axes[1].set_title("predicted minus truth of time step collided (std)")
+
+        fig.tight_layout()
         return fig, ax
 
 

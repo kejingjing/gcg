@@ -60,6 +60,8 @@ class EvalOffline(object):
         self._restore_train_policy()
 
         self._num_bnn_samples = self._params['offline'].get('num_bnn_samples', 100)
+        if self.num_bootstraps is not None:
+            self._num_bnn_samples = self.num_bootstraps
 
     def close(self):
         self._model.terminate()
@@ -260,7 +262,6 @@ class EvalOffline(object):
         update_target_after_n_steps = int(alg_args['update_target_after_n_steps'])
         update_target_every_n_steps = int(alg_args['update_target_every_n_steps'])
         log_every_n_steps = int(alg_args['log_every_n_steps'])
-        batch_size = alg_args['batch_size']
 
         timeit.reset()
         timeit.start('total')
@@ -308,7 +309,7 @@ class EvalOffline(object):
     ################
 
     def evaluate(self, plotter, eval_on_holdout=False):
-        logger.info('Evaluating model')
+        logger.info('Evaluating model on {0}'.format('holdout' if eval_on_holdout else 'train'))
 
 
         replay_pool = self._replay_holdout_pool if eval_on_holdout else self._replay_pool
@@ -345,8 +346,6 @@ class EvalOffline(object):
         for k, v in d.items():
             d[k] = np.concatenate(v)
 
-        # d['coll_labels'] has shape (-1, horizon)
-        # d['coll_preds'] has shape (-1, self._num_bnn_samples, horizon)
         # import IPython; IPython.embed()
         plotter = BnnPlotter(d['coll_preds'], d['coll_labels'])
         plotter.save_all_plots(self._eval_holdout_dir if eval_on_holdout else self._eval_train_dir)
@@ -374,7 +373,7 @@ if __name__ == '__main__':
             model.train()
 
         if not args.no_eval:
-            # model.evaluate(None, eval_on_holdout=False)
+            model.evaluate(None, eval_on_holdout=False)
             model.evaluate(None, eval_on_holdout=True)
 
         model.close()
