@@ -21,7 +21,7 @@ alg:
 
   ### Environment ###
 
-  env: "RWrccarEnv(params={'press_enter_on_reset': False, 'collision_reward_only': True, 'collision_reward': -1, 'obs_shape': (36, 64, 1)})"
+env: "RWrccarEnv(params={'speed_limits': [0.3, 0.3], 'press_enter_on_reset': False, 'collision_reward_only': True, 'collision_reward': -1, 'obs_shape': (36, 64, 1)})"
   max_path_length: 1000
   n_envs: 1 # number of training environments
   render: False
@@ -46,7 +46,7 @@ alg:
   sample_after_n_steps: -1
   onpolicy_after_n_steps: 1.e+3 # take random actions until this many steps is reached
 
-  learn_after_n_steps: -1 # when to start training the model
+  learn_after_n_steps: 100 # when to start training the model
   train_every_n_steps: 0.25 # number of calls to model.train per env.step (if fractional, multiple trains per step)
   eval_every_n_steps: 5.e+2 # how often to evaluate policy in env_eval
 
