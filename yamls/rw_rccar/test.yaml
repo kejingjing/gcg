@@ -21,7 +21,7 @@ alg:
 
   ### Environment ###
 
-  env: "RWrccarEnv(params={'speed_limits': [0.3, 0.3], 'press_enter_on_reset': False, 'collision_reward_only': True, 'collision_reward': -1, 'obs_shape': (36, 64, 1)})"
+  env: "RWrccarEnv(params={'speed_limits': [0.25, 0.25], 'press_enter_on_reset': False, 'collision_reward_only': True, 'collision_reward': -1, 'obs_shape': (36, 64, 1)})"
   max_path_length: 1000
   n_envs: 1 # number of training environments
   render: False
