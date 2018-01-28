@@ -17,7 +17,7 @@ alg:
       ssh: "avillaflor@ahsoka.banatao.berkeley.edu"
       remote_dir: "/home/avillaflor/gcg/data"
 
-      save_every_n_steps: 1000 # for dt = 0.25, this is about 1.25 minutes
+      save_every_n_steps: 3.e+2 # for dt = 0.25, this is about 1.25 minutes
 
   ### Environment ###
 
@@ -44,7 +44,7 @@ alg:
   total_steps: 14.4e+3 # 1 hours worth, corresponding to number of env.step(...) calls
 
   sample_after_n_steps: -1
-  onpolicy_after_n_steps: -1 # take random actions until this many steps is reached
+  onpolicy_after_n_steps: 1.e+3 # take random actions until this many steps is reached
 
   learn_after_n_steps: -1 # when to start training the model
   train_every_n_steps: 0.25 # number of calls to model.train per env.step (if fractional, multiple trains per step)
@@ -62,11 +62,11 @@ alg:
   exploration_strategies:
     # endpoints: [[step, value], [step, value], ...]
     GaussianStrategy: # additive gaussian noise
-      endpoints: [[0, 0.0], [1, 0.0]]
-      outside_value: 0.0
+      endpoints: [[0, 1.0], [9.6e+3, 0.1], [14.4e+3, 0.01]]
+      outside_value: 0.01
     EpsilonGreedyStrategy:
-      endpoints: [[0, 0.0], [1, 0.0]]
-      outside_value: 0.0
+      endpoints: [[0, 1.0], [9.6e+3, 0.1], [14.4e+3, 0.01]]
+      outside_value: 0.01
 
 
   ### Replay pool
