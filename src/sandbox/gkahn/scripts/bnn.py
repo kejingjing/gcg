@@ -45,8 +45,8 @@ class EvalOffline(object):
 
         logger.info('')
         logger.info('Loading data')
-        self._replay_pool = self._load_data(self._data_file_name)
-        logger.info('Size of replay pool: {0:d}'.format(len(self._replay_pool)))
+        # self._replay_pool = self._load_data(self._data_file_name) # TODO
+        # logger.info('Size of replay pool: {0:d}'.format(len(self._replay_pool)))
         self._replay_holdout_pool = self._load_data(self._data_holdout_file_name)
         logger.info('Size of holdout replay pool: {0:d}'.format(len(self._replay_holdout_pool)))
 
@@ -365,17 +365,23 @@ class EvalOffline(object):
         return d
 
     def evaluate(self):
-        d_train = self._eval_pred_all(eval_on_holdout=False)
+        d_train = defaultdict(list) # self._eval_pred_all(eval_on_holdout=False)
         d_holdout = self._eval_pred_all(eval_on_holdout=True)
 
-        # import IPython; IPython.embed()
-        plotter = BnnPlotter(d_train['coll_preds'], d_train['coll_labels'],
-                             train_preds=d_train['coll_preds'], dones=d_train['dones'])
-        plotter.save_all_plots(self._eval_train_dir, plot_types=['plot_online_decision'])
+        import IPython; IPython.embed()
+
+        # plotter = BnnPlotter(d_train['coll_preds'], d_train['coll_labels'],
+        #                      train_preds=d_train['coll_preds'], dones=d_train['dones'])
+        # plotter.save_all_plots(self._eval_train_dir, plot_types=['plot_online_decision'])
 
         plotter = BnnPlotter(d_holdout['coll_preds'], d_holdout['coll_labels'],
-                             train_preds=d_train['coll_preds'], dones=d_holdout['dones'])
-        plotter.save_all_plots(self._eval_holdout_dir, plot_types=['plot_online_decision'])
+                             train_preds=d_train['coll_preds'], dones=d_holdout['dones'],
+                             env_infos=d_holdout['env_infos'])
+        plotter.plot_online_switching_mean(save_dir=self._eval_holdout_dir)
+        # plotter.plot_online_switching_std(save_dir=self._eval_holdout_dir)
+        # plotter.plot_online_switching(save_dir=self._eval_holdout_dir)
+        # plotter.plot_online_switching_rollouts(save_dir=self._eval_holdout_dir)
+        # plotter.plot_online_decision(save_dir=self._eval_holdout_dir)
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
