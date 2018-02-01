@@ -160,7 +160,7 @@ policy:
 
   # device
   gpu_device: 0
-  gpu_frac: 0.95
+  gpu_frac: 0.4
   
   class: GCGPolicy # <GCGPolicy> model class
   GCGPolicy: &idGCGPolicy

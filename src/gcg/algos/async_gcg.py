@@ -263,7 +263,7 @@ class AsyncGCG(GCG):
                 #    train_rollouts = []
                 #    continue
                 ### reset to stop rollout
-                self._sampler.reset()
+                self._reset_sampler()
 
                 ### save rollouts
                 logger.debug('Saving files for itr {0}'.format(inference_itr))
