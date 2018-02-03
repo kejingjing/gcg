@@ -1,4 +1,4 @@
-exp_name: sim_rccar/square_cluttered_icra_probcoll
+exp_name: sim_rccar/square_cluttered_icra_probcoll_adjusted
 seed: 0
 log_level: debug
 
@@ -58,9 +58,7 @@ alg:
     terminal:
       frac: 0.5 # fraction of batch that from an end of an episode
       
-      
   ### Saving data
-      
   save_rollouts: True
   save_rollouts_observations: True # False saves space
   save_env_infos: True # False saves space
@@ -140,7 +138,7 @@ policy:
   grad_clip_norm: 10 # clip the gradient magnitude
 
   # device
-  gpu_device: 0
+  gpu_device: 1
   gpu_frac: 0.4
   
   class: GCGPolicy # <GCGPolicy> model class
@@ -165,3 +163,4 @@ policy:
         bhat_label: 'None'
         bhat_loss: 'None' 
         clip_with_done: False
+

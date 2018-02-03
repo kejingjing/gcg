@@ -17,13 +17,13 @@ class ForestEnv(RoomClutteredEnv):
         for i in range(2, 27, 5):
             for j in range(2, 27, 5):
                 if (i != 2 and i != 22) or (j!=2 and j!=22):
-                    pos = (i - 12., j - 12., 0.0)
+                    pos = (i - 12., j - 12., 0.1)
                     # path = random.choice(self._obj_paths)
                     path = self._obj_paths[index % max_len]
                     angle = oris[(index // max_len) % 4]
                     hpr = (angle, 0.0, 0.0)
                     scale = 1 if 'tree' in path else 0.4
-                    self._setup_collision_object(path, pos, hpr, scale=scale)
+                    self._setup_collision_object(path, pos, hpr, scale=scale, is_obstacle=True)
                     index += 1
         self._setup_collision_object(self._model_path)
 

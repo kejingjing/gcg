@@ -27,6 +27,11 @@ class RoomClutteredEnv(SquareEnv):
     def _default_pos(self):
         return (20.0, -20., 0.3)
 
+    def _setup_collision_object(self, path, pos=(0.0, 0.0, 0.0), hpr=(0.0, 0.0, 0.0), scale=1, is_obstacle=False):
+        SquareEnv._setup_collision_object(self, path, pos, hpr, scale)
+        if is_obstacle:
+            self._obstacles.append((path, pos, hpr))
+    
     def _setup_map(self):
         index = 0
         max_len = len(self._obj_paths)
@@ -37,8 +42,7 @@ class RoomClutteredEnv(SquareEnv):
                 path = self._obj_paths[index % max_len]
                 angle = oris[(index // max_len) % 4]
                 hpr = (angle, 0.0, 0.0)
-                self._setup_collision_object(path, pos, hpr)
-                self._obstacles.append((path, pos, hpr))
+                self._setup_collision_object(path, pos, hpr, is_obstacle=True)
                 index += 1
         self._setup_collision_object(self._model_path)
 

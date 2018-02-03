@@ -1,4 +1,4 @@
-exp_name: sim_rccar/square_cluttered_icra_dql
+exp_name: sim_rccar/square_cluttered_icra_dql_adjusted
 seed: 0
 log_level: debug
 
@@ -75,7 +75,6 @@ policy:
   
   use_target: True # target network?
   separate_target_params: True # if target network, separate parameters?
-  clip_cost_target_with_dones: False
 
   get_action_test: # how to select actions at test time (i.e., when gathering samples)
     H: 1
@@ -139,7 +138,7 @@ policy:
   grad_clip_norm: 10 # clip the gradient magnitude
 
   # device
-  gpu_device: 0
+  gpu_device: 1
   gpu_frac: 0.4
   
   class: GCGPolicy # <GCGPolicy> model class
