@@ -378,7 +378,7 @@ class EvalOffline(object):
                              train_preds=d_train['coll_preds'], dones=d_holdout['dones'],
                              env_infos=d_holdout['env_infos'])
         plotter.plot_online_switching_mean(save_dir=self._eval_holdout_dir)
-        # plotter.plot_online_switching_std(save_dir=self._eval_holdout_dir)
+        plotter.plot_online_switching_std(save_dir=self._eval_holdout_dir)
         # plotter.plot_online_switching(save_dir=self._eval_holdout_dir)
         # plotter.plot_online_switching_rollouts(save_dir=self._eval_holdout_dir)
         # plotter.plot_online_decision(save_dir=self._eval_holdout_dir)

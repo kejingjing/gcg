@@ -496,8 +496,10 @@ class GCGPolicy(object):
             tf_mse = tf.reduce_sum(costs)
 
             ### weight decay
-            if len(tf.get_collection(tf.GraphKeys.REGULARIZATION_LOSSES)) > 0:
-                tf_weight_decay = self._weight_decay * tf.add_n(tf.get_collection(tf.GraphKeys.REGULARIZATION_LOSSES))
+            reg_losses = tf.get_collection(tf.GraphKeys.REGULARIZATION_LOSSES)
+            if len(reg_losses) > 0:
+                num_trainable_vars = float(np.sum([np.prod(v.shape.as_list()) for v in tf.trainable_variables()]))
+                tf_weight_decay = (self._weight_decay / num_trainable_vars) * tf.add_n(reg_losses)
             else:
                 tf_weight_decay = 0
             tf_cost = tf_mse + tf_weight_decay
