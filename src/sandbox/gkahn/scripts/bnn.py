@@ -3,9 +3,7 @@ import glob
 import os
 import yaml
 from collections import defaultdict
-import threading
 import multiprocessing
-from queue import Queue
 
 import numpy as np
 
@@ -14,10 +12,11 @@ from gcg.envs.env_utils import create_env
 from gcg.data import mypickle
 from gcg.sampler.replay_pool import ReplayPool
 from gcg.policies.tf.bnn.bootstrap.bootstrap_replay_pool import BootstrapReplayPool
+from gcg.data.timer import timeit
 
 from gcg.policies.gcg_policy import GCGPolicy
 
-from gcg.data.timer import timeit
+from bnn_plotter import BnnPlotter
 
 class EvalOffline(object):
     def __init__(self, yaml_path):
@@ -46,8 +45,8 @@ class EvalOffline(object):
 
         logger.info('')
         logger.info('Loading data')
-        self._replay_pool = self._load_data(self._data_file_name)
-        logger.info('Size of replay pool: {0:d}'.format(len(self._replay_pool)))
+        # self._replay_pool = self._load_data(self._data_file_name) # TODO
+        # logger.info('Size of replay pool: {0:d}'.format(len(self._replay_pool)))
         self._replay_holdout_pool = self._load_data(self._data_holdout_file_name)
         logger.info('Size of holdout replay pool: {0:d}'.format(len(self._replay_holdout_pool)))
 
@@ -61,6 +60,8 @@ class EvalOffline(object):
         self._restore_train_policy()
 
         self._num_bnn_samples = self._params['offline'].get('num_bnn_samples', 100)
+        if self.num_bootstraps is not None:
+            self._num_bnn_samples = self.num_bootstraps
 
     def close(self):
         self._model.terminate()
@@ -97,6 +98,29 @@ class EvalOffline(object):
     def _init_checkpoint_file_name(self):
         if self._params['offline']['init_checkpoint'] is not None:
             return os.path.join(self._dir, self._params['offline']['init_checkpoint'])
+
+    @property
+    def _eval_train_dir(self):
+        train_str = os.path.basename(self._data_file_name)
+        dir = os.path.join(self._save_dir, 'eval_train_{0}/'.format(train_str))
+        os.makedirs(dir, exist_ok=True)
+        return dir
+
+    @property
+    def _eval_holdout_dir(self):
+        train_str = os.path.basename(self._data_file_name)
+        holdout_str = os.path.basename(self._data_holdout_file_name)
+        dir = os.path.join(self._save_dir, 'eval_train_{0}/holdout_{1}/'.format(train_str, holdout_str))
+        os.makedirs(dir, exist_ok=True)
+        return dir
+
+    @property
+    def _eval_train_rollouts_file_name(self):
+        return os.path.join(self._eval_train_dir, 'eval_rollouts.pkl')
+
+    @property
+    def _eval_holdout_rollouts_file_name(self):
+        return os.path.join(self._eval_holdout_dir, 'eval_rollouts.pkl')
 
     #############
     ### Model ###
@@ -139,12 +163,12 @@ class EvalOffline(object):
         :return: iteration that it is currently on
         """
         itr = 0
-        while len(glob.glob(self._train_policy_file_name(itr) + '*')) > 0:
+        while len(glob.glob(os.path.splitext(self._train_policy_file_name(itr))[0] + '*')) > 0:
             itr += 1
 
         if itr > 0:
             logger.info('Loading train policy from iteration {0}...'.format(itr - 1))
-            self._policy.restore(self._train_policy_file_name(itr - 1), train=True)
+            self._model.restore(self._train_policy_file_name(itr - 1), train=True)
             logger.info('Loaded train policy!')
 
     def _save_train_policy(self, save_itr):
@@ -223,7 +247,7 @@ class EvalOffline(object):
         self._batch_stop = multiprocessing.Event()
 
         self._batch_threads = []
-        for _ in range(10):
+        for _ in range(5):
             batch_thread = multiprocessing.Process(target=self._train_batch_thread,
                                                    args=(self._params['alg']['batch_size'],
                                                          self._batch_queue,
@@ -246,7 +270,6 @@ class EvalOffline(object):
         update_target_after_n_steps = int(alg_args['update_target_after_n_steps'])
         update_target_every_n_steps = int(alg_args['update_target_every_n_steps'])
         log_every_n_steps = int(alg_args['log_every_n_steps'])
-        batch_size = alg_args['batch_size']
 
         timeit.reset()
         timeit.start('total')
@@ -293,51 +316,72 @@ class EvalOffline(object):
     ### Evaluate ###
     ################
 
-    def evaluate(self, plotter, eval_on_holdout=False):
-        logger.info('Evaluating model')
+    def _eval_pred_all(self, eval_on_holdout):
+        pkl_file_name = self._eval_train_rollouts_file_name if not eval_on_holdout else self._eval_holdout_rollouts_file_name
 
-        if eval_on_holdout:
-            replay_pool = self._replay_holdout_pool
+        if os.path.exists(pkl_file_name):
+            logger.info('Load evaluation rollouts for {0}'.format('holdout' if eval_on_holdout else 'train'))
+            d = mypickle.load(pkl_file_name)
         else:
-            replay_pool = self._replay_pool
+            logger.info('Evaluating model on {0}'.format('holdout' if eval_on_holdout else 'train'))
 
-        # get collision idx in obs_vec
-        vec_spec = self._env.observation_vec_spec
-        obs_vec_start_idxs = np.cumsum([space.flat_dim for space in vec_spec.values()]) - 1
-        coll_idx = obs_vec_start_idxs[list(vec_spec.keys()).index('coll')]
+            replay_pool = self._replay_holdout_pool if eval_on_holdout else self._replay_pool
 
-        # model will be evaluated on 1e3 inputs at a time (accounting for bnn samples)
-        batch_size = 1000 // self._num_bnn_samples
-        assert (batch_size > 1)
-        rp_gen = replay_pool.sample_all_generator(batch_size=batch_size, include_env_infos=True)
+            # get collision idx in obs_vec
+            vec_spec = self._env.observation_vec_spec
+            obs_vec_start_idxs = np.cumsum([space.flat_dim for space in vec_spec.values()]) - 1
+            coll_idx = obs_vec_start_idxs[list(vec_spec.keys()).index('coll')]
 
-        # keep everything in dict d
-        d = defaultdict(list)
-        for steps, (observations_im, observations_vec), actions, rewards, dones, env_infos in rp_gen:
-            observations = (observations_im[:, :self._model.obs_history_len, :],
-                            observations_vec[:, :self._model.obs_history_len, :])
-            coll_labels = (np.cumsum(observations_vec[:, self._model.obs_history_len:, coll_idx], axis=1) >= 1.).astype(float)
+            # model will be evaluated on 1e3 inputs at a time (accounting for bnn samples)
+            batch_size = 1000 // self._num_bnn_samples
+            assert (batch_size > 1)
+            rp_gen = replay_pool.sample_all_generator(batch_size=batch_size, include_env_infos=True)
 
-            observations_repeat = (np.repeat(observations[0], self._num_bnn_samples, axis=0),
-                                   np.repeat(observations[1], self._num_bnn_samples, axis=0))
-            actions_repeat = np.repeat(actions, self._num_bnn_samples, axis=0)
+            # keep everything in dict d
+            d = defaultdict(list)
+            for steps, (observations_im, observations_vec), actions, rewards, dones, env_infos in rp_gen:
+                observations = (observations_im[:, :self._model.obs_history_len, :],
+                                observations_vec[:, :self._model.obs_history_len, :])
+                coll_labels = (np.cumsum(observations_vec[:, self._model.obs_history_len:, coll_idx], axis=1) >= 1.).astype(float)
 
-            yhats, bhats = self._model.get_model_outputs(observations_repeat, actions_repeat)
-            coll_preds = np.reshape(yhats['coll'], (len(steps), self._num_bnn_samples, -1))
+                observations_repeat = (np.repeat(observations[0], self._num_bnn_samples, axis=0),
+                                       np.repeat(observations[1], self._num_bnn_samples, axis=0))
+                actions_repeat = np.repeat(actions, self._num_bnn_samples, axis=0)
 
-            d['coll_labels'].append(coll_labels)
-            d['coll_preds'].append(coll_preds)
-            d['env_infos'].append(env_infos)
-            # Note: you can save more things (e.g. actions) if you want to do something with them later
+                yhats, bhats = self._model.get_model_outputs(observations_repeat, actions_repeat)
+                coll_preds = np.reshape(yhats['coll'], (len(steps), self._num_bnn_samples, -1))
 
-        for k, v in d.items():
-            d[k] = np.concatenate(v)
+                d['coll_labels'].append(coll_labels)
+                d['coll_preds'].append(coll_preds)
+                d['env_infos'].append(env_infos)
+                d['dones'].append(dones)
+                # Note: you can save more things (e.g. actions) if you want to do something with them later
 
-        # d['coll_labels'] has shape (-1, horizon)
-        # d['coll_preds'] has shape (-1, self._num_bnn_samples, horizon)
+            for k, v in d.items():
+                d[k] = np.concatenate(v)
 
-        # TODO: plot stuff
-        # import IPython; IPython.embed()
+            mypickle.dump(d, pkl_file_name)
+
+        return d
+
+    def evaluate(self):
+        d_train = defaultdict(list) # self._eval_pred_all(eval_on_holdout=False)
+        d_holdout = self._eval_pred_all(eval_on_holdout=True)
+
+        import IPython; IPython.embed()
+
+        # plotter = BnnPlotter(d_train['coll_preds'], d_train['coll_labels'],
+        #                      train_preds=d_train['coll_preds'], dones=d_train['dones'])
+        # plotter.save_all_plots(self._eval_train_dir, plot_types=['plot_online_decision'])
+
+        plotter = BnnPlotter(d_holdout['coll_preds'], d_holdout['coll_labels'],
+                             train_preds=d_train['coll_preds'], dones=d_holdout['dones'],
+                             env_infos=d_holdout['env_infos'])
+        plotter.plot_online_switching_mean(save_dir=self._eval_holdout_dir)
+        plotter.plot_online_switching_std(save_dir=self._eval_holdout_dir)
+        # plotter.plot_online_switching(save_dir=self._eval_holdout_dir)
+        # plotter.plot_online_switching_rollouts(save_dir=self._eval_holdout_dir)
+        # plotter.plot_online_decision(save_dir=self._eval_holdout_dir)
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
@@ -362,7 +406,6 @@ if __name__ == '__main__':
             model.train()
 
         if not args.no_eval:
-            model.evaluate(None, eval_on_holdout=False)
-            model.evaluate(None, eval_on_holdout=True)
+            model.evaluate()
 
         model.close()
