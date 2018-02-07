@@ -36,11 +36,13 @@ class CarEnv(DirectObject):
         self._do_back_up = self._params.get('do_back_up', False)
         self._use_depth = self._params.get('use_depth', False)
         self._use_back_cam = self._params.get('use_back_cam', False)
-        # TODO
+
+        self._collision_reward_only = self._params.get('collision_reward_only', False)
         self._collision_reward = self._params.get('collision_reward', -10.0)
         self._obs_shape = self._params.get('obs_shape', (64, 36))
         self._steer_limits = params.get('steer_limits', (-30., 30.))
         self._speed_limits = params.get('speed_limits', (-4.0, 4.0))
+        self._motor_limits = params.get('motor_limits', (-0.5, 0.5))
         self._fixed_speed = (self._speed_limits[0] == self._speed_limits[1] and self._use_vel)
         if not self._params.get('visualize', False):
             loadPrcFileData('', 'window-type offscreen')
@@ -148,7 +150,14 @@ class CarEnv(DirectObject):
 
         self._setup_spec()
 
-        self.spec = EnvSpec(self.observation_im_space, self.action_space, self.observation_vec_spec, self.action_spec, self.goal_spec)
+        self.spec = EnvSpec(
+            observation_im_space=self.observation_im_space,
+            action_space=self.action_space,
+            action_selection_space=self.action_selection_space,
+            observation_vec_spec=self.observation_vec_spec,
+            action_spec=self.action_spec,
+            action_selection_spec=self.action_selection_spec,
+            goal_spec=self.goal_spec)
 
         if self._run_as_task:
             self._mark_d = 0.0
@@ -157,29 +166,36 @@ class CarEnv(DirectObject):
 
     def _setup_spec(self):
         self.action_spec = OrderedDict()
-        self.unnormalized_action_spec = OrderedDict()
+        self.action_selection_spec = OrderedDict()
         self.observation_vec_spec = OrderedDict()
         self.goal_spec = OrderedDict()
 
-        self.action_spec['steer'] = Box(low=-1., high=1.)
-        self.unnormalized_action_spec['steer'] = Box(low=self._steer_limits[0], high=self._steer_limits[1])
-        
+        self.action_spec['steer'] = Box(low=-45., high=45.)
+        self.action_selection_spec['steer'] = Box(low=self._steer_limits[0], high=self._steer_limits[1])
+
         if self._use_vel:
-            if self._fixed_speed:
-                self.action_spec['speed'] = Box(low=1., high=1.)            
-                self.action_space = Box(low=np.array([-1., 1.]), high=np.array([1., 1.]))
-            else:
-                self.action_spec['speed'] = Box(low=-1., high=1.)
-                self.action_space = Box(low=np.array([-1., -1.]), high=np.array([1., 1.]))
-            self.unnormalized_action_spec['speed'] = Box(low=self._speed_limits[0], high=self._speed_limits[1])
-            self.unnormalized_action_space = Box(low=np.array([self._steer_limits[0], self._speed_limits[0]]),
-                                                 high=np.array([self._steer_limits[1], self._speed_limits[1]]))
+            self.action_spec['speed'] = Box(low=-4., high=4.)
+            self.action_space = Box(low=np.array([self.action_spec['steer'].low[0], self.action_spec['speed'].low[0]]),
+                                    high=np.array([self.action_spec['steer'].high[0], self.action_spec['speed'].high[0]]))
+
+            self.action_selection_spec['speed'] = Box(low=self._speed_limits[0], high=self._speed_limits[1])
+            self.action_selection_space = Box(low=np.array([self.action_selection_spec['steer'].low[0],
+                                                            self.action_selection_spec['speed'].low[0]]),
+                                              high=np.array([self.action_selection_spec['steer'].high[0],
+                                                             self.action_selection_spec['speed'].high[0]]))
         else:
-            self.action_spec['motor'] = Box(low=-1., high=1.)
-            self.action_space = Box(low=np.array([-1., -1.]), high=np.array([1., 1.]))
-            self.unnormalized_action_spec['motor'] = Box(low=-self._accelClamp, high=self._accelClamp)
-            self.unnormalized_action_space = Box(low=np.array([self._steer_limits[0], -self._accelClamp]),
-                                                 high=np.array([self._steer_limits[1], self._accelClamp]))
+            self.action_spec['motor'] = Box(low=-self._accelClamp, high=self._accelClamp)
+            self.action_space = Box(low=np.array([self.action_spec['steer'].low[0], self.action_spec['motor'].low[0]]),
+                                    high=np.array([self.action_spec['steer'].high[0], self.action_spec['motor'].high[0]]))
+
+            self.action_selection_spec['motor'] = Box(low=self._motor_limits[0], high=self._motor_limits[1])
+            self.action_selection_space = Box(low=np.array([self.action_selection_spec['steer'].low[0],
+                                                            self.action_selection_spec['motor'].low[0]]),
+                                              high=np.array([self.action_selection_spec['steer'].high[0],
+                                                             self.action_selection_spec['motor'].high[0]]))
+
+        assert (np.logical_and(self.action_selection_space.low >= self.action_space.low - 1e-4,
+                               self.action_selection_space.high <= self.action_space.high + 1e-4).all())
 
         self.observation_im_space = Box(low=0, high=255, shape=tuple(self._get_observation()[0].shape))
         self.observation_vec_spec['coll'] = Discrete(1)
@@ -494,10 +510,16 @@ class CarEnv(DirectObject):
             return im.astype(np.uint8)
 
     def _get_reward(self):
-        if self._collision:
-            reward = self._collision_reward
+        if self._collision_reward_only:
+            if self._collision:
+                reward = self._collision_reward
+            else:
+                reward = 0.0
         else:
-            reward = self._get_speed()
+            if self._collision:
+                reward = self._collision_reward
+            else:
+                reward = self._get_speed()
         assert (reward <= self.max_reward)
         return reward
 
@@ -528,7 +550,6 @@ class CarEnv(DirectObject):
 
     def _is_contact(self):
         result = self._world.contactTest(self._vehicle_node)
-        num_contacts = result.getNumContacts()
         return result.getNumContacts() > 0
 
     # Environment functions
@@ -549,14 +570,6 @@ class CarEnv(DirectObject):
         return self._get_observation(), self._get_goal()
 
     def step(self, action):
-        lb, ub = self.unnormalized_action_space.bounds
-        scaled_action = lb + (action + 1.) * 0.5 * (ub - lb)
-        scaled_action = np.clip(scaled_action, lb, ub)
-
-        if self._fixed_speed:
-            scaled_action[1] = self._speed_limits[0]
-        action = scaled_action
-        
         self._steering = action[0]
         if action[1] == 0.0:
             self._brakeForce = 1000.

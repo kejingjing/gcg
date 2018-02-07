@@ -219,9 +219,15 @@ class GCGPolicy(object):
         # tf.assert_equal(tf.shape(tf_obs_lowd)[0], tf.shape(tf_actions_ph)[0])
 
         with tf.variable_scope(self._action_scope):
+            ### whiten the actions
+            action_space = self._env_spec.action_space
+            action_mean = np.tile(0.5 * (action_space.low + action_space.high), (self._H, 1))
+            action_scale = np.tile(action_space.high - action_space.low, (self._H, 1))
+            tf_actions = (tf_actions_ph - action_mean) / action_scale
+
             self._action_graph.update({'output_dim': self._observation_graph['output_dim']})
             self._action_graph.update({'batch_size': batch_size})
-            rnn_inputs = networks.fcnn(tf_actions_ph, self._action_graph, is_training=is_training,
+            rnn_inputs = networks.fcnn(tf_actions, self._action_graph, is_training=is_training,
                                           T=H, global_step_tensor=self.global_step)
 
         with tf.variable_scope(self._rnn_scope):

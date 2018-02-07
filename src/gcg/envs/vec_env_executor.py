@@ -6,6 +6,7 @@ class VecEnvExecutor(object):
     def __init__(self, envs, max_path_length):
         self.envs = envs
         self._action_space = envs[0].action_space
+        self._action_selection_space = envs[0].action_selection_space
         self.ts = np.zeros(len(self.envs), dtype='int')
         self.max_path_length = max_path_length
         self._skips = np.array([False] * len(self.envs))
@@ -53,6 +54,10 @@ class VecEnvExecutor(object):
     @property
     def action_space(self):
         return self._action_space
+
+    @property
+    def action_selection_space(self):
+        return self._action_selection_space
 
     def terminate(self):
         pass
