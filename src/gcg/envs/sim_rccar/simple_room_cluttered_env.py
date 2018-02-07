@@ -5,8 +5,8 @@ from gcg.envs.sim_rccar.room_cluttered_env import RoomClutteredEnv
 class SimpleRoomClutteredEnv(RoomClutteredEnv):
     def __init__(self, params={}):
         self._base_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'models')
-        params.setdefault('model_path', os.path.join(self._base_dir, 'small_room.egg'))
-        params.setdefault('obj_paths', ['bookcase.egg'])
+        self._model_path = os.path.join(self._base_dir, 'small_room.egg')
+        self._setup_object_paths(['bookcase.egg'])
         RoomClutteredEnv.__init__(self, params=params)
 
     def _setup_map(self):

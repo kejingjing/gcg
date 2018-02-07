@@ -174,6 +174,12 @@ def block_diagonal(matrices, dtype=tf.float32):
     blocked.set_shape(batch_shape.concatenate((blocked_rows, blocked_cols)))
     return blocked
 
+def sample_categorical(p):
+    # TODO change to tf.distributions once update tf version
+    dist = tf.contrib.distributions.Categorical(probs=p)
+    sample = dist.sample()
+    return sample
+
 ###############
 ### Asserts ###
 ###############

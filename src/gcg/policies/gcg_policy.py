@@ -309,6 +309,7 @@ class GCGPolicy(object):
         N = self._N
         assert(H <= N)
         get_action_type = get_action_params['type']
+        get_action_selection = get_action_params.get('selection', 'argmax')
         num_obs = tf.shape(tf_obs_im_ph)[0]
 
         ### create actions
@@ -363,27 +364,39 @@ class GCGPolicy(object):
        
         ### get_action based on select (policy)
         tf_values_select = tf.reshape(tf_values_select, (num_obs, K))  # [num_obs, K]
-        tf_values_argmax_select = tf.one_hot(tf.argmax(tf_values_select, 1), depth=K)  # [num_obs, K]
+        if get_action_selection == 'argmax':
+            tf_select_chosen = tf.argmax(tf_values_select, axis=1)
+        elif get_action_selection == 'softmax':
+            tf_select_soft_mask = tf.nn.softmax(tf_values_select)
+            tf_select_chosen = tf_utils.sample_categorical(tf_select_soft_mask)
+        else:
+            raise NotImplementedError
+        tf_select_mask = tf.expand_dims(tf.one_hot(tf_select_chosen, depth=K), axis=2)  # [num_obs, K, 1]
         tf_get_action = tf.reduce_sum(
-            tf.tile(tf.expand_dims(tf_values_argmax_select, 2), (1, 1, self._action_dim)) *
-            tf.reshape(tf_actions, (num_obs, K, H, self._action_dim))[:, :, 0, :],
+            tf_select_mask * tf.reshape(tf_actions, (num_obs, K, H, self._action_dim))[:, :, 0, :],
             reduction_indices=1)  # [num_obs, action_dim]
         ### get_action_value based on eval (target)
-        tf_values_eval = tf.reshape(tf_values_eval, (num_obs, K))  # [num_obs, K]
-        tf_get_action_value = tf.reduce_sum(tf_values_argmax_select * tf_values_eval, reduction_indices=1)
-
-        tf_argmax_mask = tf.expand_dims(tf_values_argmax_select, axis=2)
+        # TODO maybe make soft depending on selection
+        if get_action_selection == 'argmax':
+            tf_values_eval = tf.reshape(tf_values_eval, (num_obs, K, 1))  # [num_obs, K, 1]
+            tf_get_action_value = tf.reduce_sum(tf_select_mask * tf_values_eval, axis=(1, 2))
+        elif get_action_selection == 'softmax':
+            tf_values_eval = tf.reshape(tf_values_eval, (num_obs, K))  # [num_obs, K]
+            tf_get_action_value = tf.reduce_sum(tf_select_soft_mask * tf_values_eval, axis=1)
+        else:
+            raise NotImplementedError
+        
         action_values = OrderedDict()
         for key in values_all_eval.keys():
-            action_values[key] = tf.reduce_sum(tf.reshape(values_all_eval[key], (num_obs, K, H)) * tf_argmax_mask, axis=1)
+            action_values[key] = tf.reduce_sum(tf.reshape(values_all_eval[key], (num_obs, K, H)) * tf_select_mask, axis=1)
 
         action_yhats = OrderedDict()
         for key in yhats_all_eval.keys():
-            action_yhats[key] = tf.reduce_sum(tf.reshape(yhats_all_eval[key], (num_obs, K, H)) * tf_argmax_mask, axis=1)
+            action_yhats[key] = tf.reduce_sum(tf.reshape(yhats_all_eval[key], (num_obs, K, H)) * tf_select_mask, axis=1)
 
         action_bhats = OrderedDict()
         for key in bhats_all_eval.keys():
-            action_bhats[key] = tf.reduce_sum(tf.reshape(bhats_all_eval[key], (num_obs, K, H)) * tf_argmax_mask, axis=1)
+            action_bhats[key] = tf.reduce_sum(tf.reshape(bhats_all_eval[key], (num_obs, K, H)) * tf_select_mask, axis=1)
 
         ### check shapes
         assert(tf_get_action.get_shape()[1].value == self._action_dim)

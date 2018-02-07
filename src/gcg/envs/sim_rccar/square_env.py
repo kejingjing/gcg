@@ -1,22 +1,15 @@
 import os
 
-from gcg.envs.sim_rccar.cylinder_env import CylinderEnv
+from gcg.envs.sim_rccar.car_env import CarEnv
 
-class SquareEnv(CylinderEnv):
+
+class SquareEnv(CarEnv):
 
     def __init__(self, params={}):
-        params.setdefault('back_up', {
-            'steer': [-5., 5.],
-            'vel': -1.,
-            'duration': 3.
-        })
-        params.setdefault('model_path', os.path.join(os.path.dirname(os.path.abspath(__file__)), 'models/square.egg'))
+        self._model_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'models/square.egg')
 
-        CylinderEnv.__init__(self, params=params)
+        CarEnv.__init__(self, params=params)
 
-    def _setup_light(self):
-        pass
-        
     def _default_pos(self):
         return (20.0, -19., 0.3)
 
@@ -30,6 +23,10 @@ class SquareEnv(CylinderEnv):
 
     def _get_done(self):
         return self._collision
+
+    def reset(self, pos=None, hpr=None, hard_reset=False):
+        hard_reset = hard_reset or self._env_time_step <= 2
+        return CarEnv.reset(self, pos=pos, hpr=hpr, hard_reset=hard_reset)
 
     @property
     def horizon(self):

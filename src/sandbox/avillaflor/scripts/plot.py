@@ -103,8 +103,9 @@ class Plot:
             for trajectory in rollout:
                 env_infos = trajectory['env_infos'][:-1]
 #                reward = sum([ for env_info in env_infos])
-#                reward = sum(trajectory
-                reward = len(trajectory['rewards'][:-1])
+                reward = sum(trajectory['rewards'][:-1])
+#                reward = np.mean([env_info['vel'] for env_info in env_infos[8:-1]])
+#                reward = len(trajectory['rewards'][:-1])
                 coll = int(env_infos[-1]['coll'])
                 rewards.append(reward)
                 crashes.append(coll)

@@ -1,6 +1,5 @@
 import numpy as np
 from gcg.envs.sim_rccar.car_env import CarEnv
-from gcg.data.logger import logger
 
 
 class VecEnvExecutor(object):
@@ -15,12 +14,7 @@ class VecEnvExecutor(object):
         all_results = []
         for i, env in enumerate(self.envs):
             if self._skips[i]:
-                # TODO pretty hard coded
-                if self.ts[i] <= 2 and isinstance(env, CarEnv):
-                    logger.info('Hard resetting!')
-                    ob, goal = env.reset(hard_reset=True)
-                else:
-                    ob, goal = env.reset()
+                ob, goal = env.reset()
                 self.ts[i] = 0
                 all_result = [ob, goal, 0., True, {}]
                 all_results.append(all_result)

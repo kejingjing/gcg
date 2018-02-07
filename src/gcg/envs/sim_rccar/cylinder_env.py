@@ -7,13 +7,7 @@ from gcg.envs.sim_rccar.car_env import CarEnv
 class CylinderEnv(CarEnv):
 
     def __init__(self, params={}):
-        params.setdefault('steer_limits', [-30., 30.])
-        params.setdefault('speed_limits', [2., 2.])
-
-        params.setdefault('use_depth', False)
-        params.setdefault('do_back_up', False)
-        self._model_path = params.get('model_path',
-                                      os.path.join(os.path.dirname(os.path.abspath(__file__)), 'models/cylinder.egg'))
+        self._model_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'models/cylinder.egg')
 
         CarEnv.__init__(
             self,
