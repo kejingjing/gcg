@@ -56,16 +56,18 @@ The commands are
 ---
 ### Yaml experiment configuration files
 
-The [yamls](https://github.com/gkahn13/gcg/blob/master/yamls/) folder contains experiment configuration files for [Double Q-learning](https://github.com/gkahn13/gcg/blob/master/yamls/sim_rccar/dql.yaml)  and [our approach](https://github.com/gkahn13/gcg/tree/gcg_release/sandbox/gkahn/gcg/yamls/ours.yaml).
+The [yamls](https://github.com/gkahn13/gcg/blob/master/yamls/) folder contains experiment configuration files for [Double Q-learning](https://github.com/gkahn13/gcg/blob/master/yamls/sim_rccar/benchmarks/coll_dql.yaml) and [our approach](https://github.com/gkahn13/gcg/blob/master/yamls/sim_rccar/benchmarks/coll_ours.yaml).
 
 These yaml files can be adapted to form alternative instantiations of the generalized computation graph. Please see the example yaml files for detailed descriptions.
 
 ---
 ### Running the code
 
-To run our approach, execute
+First, create the folder data/ in the main directory.
+
+Then, to run our approach, execute
 ```bash
-$ python scripts/run_exp.py --exps sim_rccar/ours
+$ python scripts/run_exp.py --exps sim_rccar/benchmarks/coll_ours
 ```
 
 The results will be stored in the data/ folder.
