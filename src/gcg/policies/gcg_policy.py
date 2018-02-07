@@ -287,13 +287,13 @@ class GCGPolicy(object):
         return values
     
     def _graph_generate_random_actions(self, K):
-        if isinstance(self._env_spec.action_space, Discrete):
+        if isinstance(self._env_spec.action_selection_space, Discrete):
             tf_actions = tf.one_hot(tf.random_uniform([K, 1], minval=0, maxval=self._action_dim, dtype=tf.int32),
                                     depth=self._action_dim,
                                     axis=2)
         else:
-            action_lb = np.expand_dims(self._env_spec.action_space.low, 0)
-            action_ub = np.expand_dims(self._env_spec.action_space.high, 0)
+            action_lb = np.expand_dims(self._env_spec.action_selection_space.low, 0)
+            action_ub = np.expand_dims(self._env_spec.action_selection_space.high, 0)
             tf_actions = (action_ub - action_lb) * tf.random_uniform([K, self._action_dim]) + action_lb
 
         return tf_actions
@@ -317,16 +317,16 @@ class GCGPolicy(object):
         ### create actions
         if get_action_type == 'random':
             K = get_action_params[get_action_type]['K']
-            if isinstance(self._env_spec.action_space, Discrete):
+            if isinstance(self._env_spec.action_selection_space, Discrete):
                 tf_actions = tf.one_hot(tf.random_uniform([K, H], minval=0, maxval=self._action_dim, dtype=tf.int32),
                                         depth=self._action_dim,
                                         axis=2)
             else:
-                action_lb = np.expand_dims(self._env_spec.action_space.low, 0)
-                action_ub = np.expand_dims(self._env_spec.action_space.high, 0)
+                action_lb = np.expand_dims(self._env_spec.action_selection_space.low, 0)
+                action_ub = np.expand_dims(self._env_spec.action_selection_space.high, 0)
                 tf_actions = (action_ub - action_lb) * tf.random_uniform([K, H, self._action_dim]) + action_lb
         elif get_action_type == 'lattice':
-            assert(isinstance(self._env_spec.action_space, Discrete))
+            assert(isinstance(self._env_spec.action_selection_space, Discrete))
             indices = cartesian([np.arange(self._action_dim)] * H) + np.r_[0:self._action_dim * H:self._action_dim]
             actions = np.zeros((len(indices), self._action_dim * H))
             for i, one_hots in enumerate(indices):
@@ -417,8 +417,8 @@ class GCGPolicy(object):
             tf_explore_ph = tf_es_ph_dict['gaussian']
             tf_actions_explore = tf.clip_by_value(tf_actions_explore + tf.random_normal(tf.shape(tf_actions_explore)) *
                                                   tf.tile(tf.expand_dims(tf_explore_ph, 1), (1, self._action_dim)),
-                                                  self._env_spec.action_space.low,
-                                                  self._env_spec.action_space.high)
+                                                  self._env_spec.action_selection_space.low,
+                                                  self._env_spec.action_selection_space.high)
         if self._epsilon_greedy_es:
             tf_explore_ph = tf_es_ph_dict['epsilon_greedy']
             mask = tf.cast(tf.tile(tf.expand_dims(tf.random_uniform([batch_size]) < tf_explore_ph, 1), (1, self._action_dim)), tf.float32)
@@ -824,7 +824,7 @@ class GCGPolicy(object):
                                                          self._tf_dict['get_action_value']],
                                                         feed_dict=feed_dict)
 
-        if isinstance(self._env_spec.action_space, Discrete):
+        if isinstance(self._env_spec.action_selection_space, Discrete):
             actions = [int(a.argmax()) for a in actions]
 
         return actions, values, ds

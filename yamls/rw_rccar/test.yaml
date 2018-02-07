@@ -12,16 +12,16 @@ alg:
     train:
       save_every_n_steps: 2.e+3 # about every 5 minutes
       reset_every_n_steps: # 1.e+5 # about every 50 minutes
-  
+
     inference:
-      ssh: "avillaflor@ahsoka.banatao.berkeley.edu"
-      remote_dir: "/home/avillaflor/gcg/data"
+      ssh: "gkahn@ahsoka.banatao.berkeley.edu"
+      remote_dir: "/home/gkahn/code/gcg/data"
 
       save_every_n_steps: 3.e+2 # for dt = 0.25, this is about 1.25 minutes
 
   ### Environment ###
 
-  env: "RWrccarEnv(params={'speed_limits': [0.25, 0.25], 'press_enter_on_reset': False, 'collision_reward_only': True, 'collision_reward': -1, 'obs_shape': (36, 64, 1)})"
+  env: "RWrccarEnv(params={'speed_limits': [0.2, 0.2], 'press_enter_on_reset': False, 'collision_reward_only': True, 'collision_reward': -1, 'obs_shape': (36, 64, 1)})"
   max_path_length: 1000
   n_envs: 1 # number of training environments
   render: False
@@ -30,12 +30,12 @@ alg:
   ### Offpolicy data ###
 
   offpolicy_rosbags:
-    folders: 
+    folders:
     total_steps: 4.e+5
     save_every_n_steps: 1.e+4
     update_target_every_n_steps: 1.e+3
     log_every_n_steps: 1.e+3
-  offpolicy:
+  offpolicy: ['/home/gkahn/code/gcg/data/rw_rccar/cory5_jan_31/rosbags']
   num_offpolicy: # number of offpolicy datapoints to load
 
 
@@ -46,7 +46,7 @@ alg:
   sample_after_n_steps: -1
   onpolicy_after_n_steps: 1.e+3 # take random actions until this many steps is reached
 
-  learn_after_n_steps: 100 # when to start training the model
+  learn_after_n_steps: -1 # when to start training the model
   train_every_n_steps: 0.25 # number of calls to model.train per env.step (if fractional, multiple trains per step)
   eval_every_n_steps: 5.e+2 # how often to evaluate policy in env_eval
 
@@ -152,7 +152,7 @@ policy:
   only_completed_episodes: False # only train with fully completed episodes?
 
   # training
-  weight_decay: 1.e-6 # L2 regularization
+  weight_decay: 0.5 # L2 regularization
   lr_schedule: # learning rate schedule
     endpoints: [[0, 1.e-4], [1.e+6, 1.e-4]]
     outside_value: 1.e-4

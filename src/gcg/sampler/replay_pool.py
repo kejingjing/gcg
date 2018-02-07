@@ -115,6 +115,7 @@ class ReplayPool(object):
         if self._last_done_index == self._index:
             return
 
+        self._done_indices.append(self._index - 1)
         indices = self._get_indices(self._last_done_index, self._index)
         rewards = self._rewards[indices]
 
@@ -131,8 +132,7 @@ class ReplayPool(object):
             assert(self._curr_size + 1 >= self._size)
             if self._index in self._done_indices:
                 self._done_indices.remove(self._index)
-        if done:
-            self._done_indices.append(self._index)
+
         self._dones[self._index] = done
         self._env_infos[self._index] = env_info if self._save_env_infos else None
         if self._sampling_method == 'uniform':
@@ -398,7 +398,7 @@ class ReplayPool(object):
             assert(len(arr) == batch_size)
 
         return steps, (observations_im, observations_vec), actions, rewards, dones, env_infos
-    
+
     ###############
     ### Logging ###
     ###############
