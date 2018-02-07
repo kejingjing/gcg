@@ -1,5 +1,5 @@
 import os
-
+from collections import OrderedDict, deque
 import numpy as np
 # import cv2
 from PIL import Image
@@ -7,7 +7,7 @@ from io import BytesIO
 
 from gcg.envs.env_spec import EnvSpec
 from gcg.envs.spaces.box import Box
-
+from gcg.envs.spaces.discrete import Discrete
 from gcg.data.logger import logger
 
 try:
@@ -93,21 +93,31 @@ class RWrccarEnv:
         params.setdefault('speed_limits', [0.2, 0.2])
         params.setdefault('backup_motor', -0.22)
         params.setdefault('backup_duration', 1.6)
-        params.setdefault('backup_steer_range', (-0.5, 0.5))
+        params.setdefault('backup_steer_range', (-0.8, 0.8))
         params.setdefault('press_enter_on_reset', False)
 
+        # TODO
+        self._use_vel = True
+        self._obs_shape = params['obs_shape']
+        self._steer_limits = params['steer_limits']
+        self._speed_limits = params['speed_limits']
+        self._fixed_speed = (self._speed_limits[0] == self._speed_limits[1] and self._use_vel)
         self._collision_reward = params['collision_reward']
         self._collision_reward_only = params['collision_reward_only']
 
         self._dt = params['dt']
         self.horizon = params['horizon']
 
-        self.action_space = Box(low=np.array([params['steer_limits'][0], params['speed_limits'][0]]),
-                                high=np.array([params['steer_limits'][1], params['speed_limits'][1]]))
-        self.observation_im_space = Box(low=0, high=255, shape=params['obs_shape'])
-        self.observation_vec_space = Box(np.array([]), np.array([]))
+        self._setup_spec()
         assert (self.observation_im_space.shape[-1] == 1 or self.observation_im_space.shape[-1] == 3)
-        self.spec = EnvSpec(self.observation_im_space, self.observation_vec_space, self.action_space)
+        self.spec = EnvSpec(
+            observation_im_space=self.observation_im_space,
+            action_space=self.action_space,
+            action_selection_space=self.action_selection_space,
+            observation_vec_spec=self.observation_vec_spec,
+            action_spec=self.action_spec,
+            action_selection_spec=self.action_selection_spec,
+            goal_spec=self.goal_spec)
 
         self._last_step_time = None
         self._is_collision = False
@@ -148,6 +158,7 @@ class RWrccarEnv:
             ('cmd/motor', std_msgs.msg.Float32),
             ('cmd/vel', std_msgs.msg.Float32)
         ])
+        self._collision_stuck_deque = deque([], 3)
         self._ros_msgs = dict()
         self._ros_msg_times = dict()
         for topic, type in self._ros_topics_and_types.items():
@@ -164,6 +175,34 @@ class RWrccarEnv:
         self._t = 0
 
         rospy.sleep(1)
+
+    def _setup_spec(self):
+        self.action_spec = OrderedDict()
+        self.action_selection_spec = OrderedDict()
+        self.observation_vec_spec = OrderedDict()
+        self.goal_spec = OrderedDict()
+
+        self.action_spec['steer'] = Box(low=-1., high=1.)
+        self.action_spec['speed'] = Box(low=-0.3, high=0.3)
+        self.action_space = Box(low=np.array([self.action_spec['steer'].low[0], self.action_spec['speed'].low[0]]),
+                                high=np.array([self.action_spec['steer'].high[0], self.action_spec['speed'].high[0]]))
+
+        self.action_selection_spec['steer'] = Box(low=self._steer_limits[0], high=self._steer_limits[1])
+        self.action_selection_spec['speed'] = Box(low=self._speed_limits[0], high=self._speed_limits[1])
+        self.action_selection_space = Box(low=np.array([self.action_selection_spec['steer'].low[0],
+                                                        self.action_selection_spec['speed'].low[0]]),
+                                          high=np.array([self.action_selection_spec['steer'].high[0],
+                                                         self.action_selection_spec['speed'].high[0]]))
+
+        assert (np.logical_and(self.action_selection_space.low >= self.action_space.low,
+                               self.action_selection_space.high <= self.action_space.high).all())
+
+        self.observation_im_space = Box(low=0, high=255, shape=self._obs_shape)
+        self.observation_vec_spec['coll'] = Discrete(1)
+        self.observation_vec_spec['heading'] = Box(low=0, high=2 * 3.14)
+        self.observation_vec_spec['speed'] = Box(low=-0.4, high=0.4)
+        self.observation_vec_spec['steer'] = Box(low=-1., high=1.)
+        self.observation_vec_spec['motor'] = Box(low=-1., high=1.)
 
     def _get_observation(self):
         msg = self._ros_msgs['camera/image_raw/compressed']
@@ -183,9 +222,19 @@ class RWrccarEnv:
                                                Image.ANTIALIAS)  # b/c (width, height)
             im = np.array(rgb_resized)
 
-        vec = np.array([])
+        coll = self._is_collision
+        heading = self._ros_msgs['orientation/rpy'].z
+        speed = self._get_speed()
+        steer = self._ros_msgs['steer'].data
+        motor = self._ros_msgs['motor'].data
+
+        vec = np.array([coll, heading, speed, steer, motor])
 
         return im, vec
+
+    def _get_goal(self):
+        # TODO: make sure if there is a goal, to add it as a ROS msg
+        return np.array([])
 
     def _get_speed(self):
         return self._ros_msgs['encoder/both'].data
@@ -226,8 +275,9 @@ class RWrccarEnv:
         if not offline:
             assert (self.ros_is_good())
 
-        lb, ub = self.action_space.bounds
-        action = np.clip(action, lb, ub)
+        action = np.asarray(action)
+        assert (np.logical_and(action >= self.action_space.low,
+                               action <= self.action_space.high).all())
 
         cmd_steer, cmd_vel = action
         self._set_steer(cmd_steer)
@@ -238,6 +288,7 @@ class RWrccarEnv:
             self._last_step_time = rospy.Time.now()
 
         next_observation = self._get_observation()
+        goal = self._get_goal()
         reward = self._get_reward()
         done = self._get_done()
         env_info = dict()
@@ -251,12 +302,12 @@ class RWrccarEnv:
                 self._t = 0
                 self._ros_rolloutbag.close()
 
-        return next_observation, reward, done, env_info
+        return next_observation, goal, reward, done, env_info
 
     def reset(self, offline=False):
         if offline:
             self._is_collision = False
-            return self._get_observation()
+            return self._get_observation(), self._get_goal()
 
         assert (self.ros_is_good())
 
@@ -297,7 +348,7 @@ class RWrccarEnv:
 
         assert (self.ros_is_good())
 
-        return self._get_observation()
+        return self._get_observation(), self._get_goal()
 
     ###########
     ### ROS ###
@@ -309,9 +360,16 @@ class RWrccarEnv:
         self._ros_msg_times[topic] = rospy.Time.now()
 
         if topic == 'collision/all':
+            #is_collision_stuck = (np.all(self._collision_stuck_deque) and self._t > 2) if len(self._collision_stuck_deque) == self._collision_stuck_deque.maxlen else False
+            #is_collision_bumper = self._ros_msgs['collision/bumper'].data if 'collision/bumper' in self._ros_msgs else False
+            #is_collision_flip = self._ros_msgs['collision/flip'].data if 'collision/flip' in self._ros_msgs else False
+            #is_collision_jolt = self._ros_msgs['collision/jolt'].data if 'collision/jolt' in self._ros_msgs else False
+            #if is_collision_bumper or is_collision_flip or is_collision_jolt or (is_collision_stuck and self._t > 8):
+            #    self._is_collision = True
             if msg.data == 1:
                 self._is_collision = True
-
+        elif topic == 'collision/stuck':
+            self._collision_stuck_deque.append(msg.data)
                 # if 'collision' in topic and msg.data == 1 and 'all' not in topic:
                 #    logger.debug(topic)
 

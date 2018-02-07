@@ -287,13 +287,13 @@ class GCGPolicy(object):
         return values
     
     def _graph_generate_random_actions(self, K):
-        if isinstance(self._env_spec.action_space, Discrete):
+        if isinstance(self._env_spec.action_selection_space, Discrete):
             tf_actions = tf.one_hot(tf.random_uniform([K, 1], minval=0, maxval=self._action_dim, dtype=tf.int32),
                                     depth=self._action_dim,
                                     axis=2)
         else:
-            action_lb = np.expand_dims(self._env_spec.action_space.low, 0)
-            action_ub = np.expand_dims(self._env_spec.action_space.high, 0)
+            action_lb = np.expand_dims(self._env_spec.action_selection_space.low, 0)
+            action_ub = np.expand_dims(self._env_spec.action_selection_space.high, 0)
             tf_actions = (action_ub - action_lb) * tf.random_uniform([K, self._action_dim]) + action_lb
 
         return tf_actions
@@ -317,16 +317,16 @@ class GCGPolicy(object):
         ### create actions
         if get_action_type == 'random':
             K = get_action_params[get_action_type]['K']
-            if isinstance(self._env_spec.action_space, Discrete):
+            if isinstance(self._env_spec.action_selection_space, Discrete):
                 tf_actions = tf.one_hot(tf.random_uniform([K, H], minval=0, maxval=self._action_dim, dtype=tf.int32),
                                         depth=self._action_dim,
                                         axis=2)
             else:
-                action_lb = np.expand_dims(self._env_spec.action_space.low, 0)
-                action_ub = np.expand_dims(self._env_spec.action_space.high, 0)
+                action_lb = np.expand_dims(self._env_spec.action_selection_space.low, 0)
+                action_ub = np.expand_dims(self._env_spec.action_selection_space.high, 0)
                 tf_actions = (action_ub - action_lb) * tf.random_uniform([K, H, self._action_dim]) + action_lb
         elif get_action_type == 'lattice':
-            assert(isinstance(self._env_spec.action_space, Discrete))
+            assert(isinstance(self._env_spec.action_selection_space, Discrete))
             indices = cartesian([np.arange(self._action_dim)] * H) + np.r_[0:self._action_dim * H:self._action_dim]
             actions = np.zeros((len(indices), self._action_dim * H))
             for i, one_hots in enumerate(indices):
@@ -417,8 +417,8 @@ class GCGPolicy(object):
             tf_explore_ph = tf_es_ph_dict['gaussian']
             tf_actions_explore = tf.clip_by_value(tf_actions_explore + tf.random_normal(tf.shape(tf_actions_explore)) *
                                                   tf.tile(tf.expand_dims(tf_explore_ph, 1), (1, self._action_dim)),
-                                                  self._env_spec.action_space.low,
-                                                  self._env_spec.action_space.high)
+                                                  self._env_spec.action_selection_space.low,
+                                                  self._env_spec.action_selection_space.high)
         if self._epsilon_greedy_es:
             tf_explore_ph = tf_es_ph_dict['epsilon_greedy']
             mask = tf.cast(tf.tile(tf.expand_dims(tf.random_uniform([batch_size]) < tf_explore_ph, 1), (1, self._action_dim)), tf.float32)
@@ -699,6 +699,7 @@ class GCGPolicy(object):
                 tf_cost, tf_mse, tf_costs = self._graph_cost(values, yhats, bhats, tf_obs_vec_target_ph, tf_rewards_ph, tf_dones_ph, target_inputs, target_values, target_yhats, target_bhats) 
                 tf_opt, tf_lr_ph = self._graph_optimize(tf_cost, tf_trainable_policy_vars)
             else:
+                tf_costs = []
                 tf_target_vars = tf_update_target_fn = tf_cost = tf_mse = tf_opt = tf_lr_ph = None
 
             ### savers
@@ -747,7 +748,7 @@ class GCGPolicy(object):
         if self._use_target and self._separate_target_params and self._tf_dict['update_target_fn']:
             self._tf_dict['sess'].run(self._tf_dict['update_target_fn'])
 
-    def train_step(self, step, steps, observations, actions, rewards, dones, use_target):
+    def train_step(self, step, steps, observations, goals, actions, rewards, dones, use_target):
         """
         :param steps: [batch_size, N+1]
         :param observations_im: [batch_size, N+1 + obs_history_len-1, obs_im_dim]
@@ -823,7 +824,7 @@ class GCGPolicy(object):
                                                          self._tf_dict['get_action_value']],
                                                         feed_dict=feed_dict)
 
-        if isinstance(self._env_spec.action_space, Discrete):
+        if isinstance(self._env_spec.action_selection_space, Discrete):
             actions = [int(a.argmax()) for a in actions]
 
         return actions, values, ds

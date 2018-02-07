@@ -31,22 +31,32 @@ class AsyncGCG(GCG):
     ### Async methods ###
     #####################
 
+    @property
+    def _rsync_send_includes(self):
+        return ['*_rollouts.pkl']
+
+    @property
+    def _rsync_recv_includes(self):
+        return ['*_inference_policy_inference.ckpt*']
+
     def _rsync_thread(self):
         only_exp_dir = os.path.join(*self._save_dir.split('/')[-2:])  # exp_prefix/exp_name
 
         while True:
             ### rsync for *_rollouts.pkl --> train
-            send_rsync_cmd = "rsync -az -e 'ssh' --include='{0}' --exclude='*' '{1}' {2}:{3}".format(
-                '*_rollouts.pkl',
+            send_include_str = ' '.join(["--include='{0}'".format(include) for include in self._rsync_send_includes])
+            send_rsync_cmd = "rsync -az -e 'ssh' {0} --exclude='*' '{1}' {2}:{3}".format(
+                send_include_str,
                 os.path.join(self._save_dir, ''),
                 self._ssh,
                 os.path.join(self._remote_dir, only_exp_dir, ''))
             send_retcode = os.system(send_rsync_cmd)
-
+            
             ### rsync for train --> *_inference_policy.ckpt files
             with self._rsync_lock:
-                recv_rsync_cmd = "rsync -az -e 'ssh' --include='{0}' --exclude='*' {1}:{2} '{3}'".format(
-                    '*_inference_policy.ckpt*',
+                recv_include_str = ' '.join(["--include='{0}'".format(include) for include in self._rsync_recv_includes])
+                recv_rsync_cmd = "rsync -az -e 'ssh' {0} --exclude='*' {1}:{2} '{3}'".format(
+                    recv_include_str,
                     self._ssh,
                     os.path.join(self._remote_dir, only_exp_dir, ''),
                     os.path.join(self._save_dir, '')
@@ -100,6 +110,19 @@ class AsyncGCG(GCG):
     ### Training methods ###
     ########################
 
+    def _train_load_data(self, inference_itr):
+        new_inference_itr = self._get_inference_itr()
+        if inference_itr < new_inference_itr:
+            for i in range(inference_itr, new_inference_itr):
+                try:
+                    logger.debug('Loading files for itr {0}'.format(i))
+                    self._sampler.add_rollouts([self._train_rollouts_file_name(i)])
+                    inference_itr = i + 1
+                except:
+                    logger.debug('Failed to load files for itr {0}'.format(i))
+
+        return inference_itr
+
     def train(self):
         ### restore where we left off
         self._restore_train()
@@ -118,17 +141,16 @@ class AsyncGCG(GCG):
                 break
 
             if inference_step >= self._learn_after_n_steps:
-                ### update preprocess
-                if train_step % self._update_preprocess_every_n_steps == 0:
-                    self._policy.update_preprocess(self._sampler.statistics)
-
                 ### training step
                 train_step += 1
                 timeit.start('batch')
-                batch = self._sampler.sample(self._batch_size)
+                steps, observations, goals, actions, rewards, dones, _ = \
+                    self._sampler.sample(self._batch_size)
                 timeit.stop('batch')
                 timeit.start('train')
-                self._policy.train_step(train_step, *batch, use_target=target_updated)
+                self._policy.train_step(train_step, steps=steps, observations=observations, goals=goals,
+                                        actions=actions, rewards=rewards, dones=dones,
+                                        use_target=target_updated)
                 timeit.stop('train')
 
                 ### update target network
@@ -164,26 +186,17 @@ class AsyncGCG(GCG):
                 self._policy.reset_weights()
 
             ### load data
-            new_inference_itr = self._get_inference_itr()
-            if inference_itr < new_inference_itr:
-                for i in range(inference_itr, new_inference_itr):
-                    try:
-                        logger.debug('Loading files for itr {0}'.format(i))
-                        self._sampler.add_rollouts([self._train_rollouts_file_name(i)])
-                        inference_itr = i + 1
-                    except:
-                        logger.debug('Failed to load files for itr {0}'.format(i))
+            inference_itr = self._train_load_data(inference_itr)
 
-    def _reset_sampler(self):
-        while True:
-            try:
-                self._sampler.reset()
-                break
-            except Exception as e:
-                logger.warn('Reset exception {0}'.format(str(e)))
-                while not self._env.ros_is_good(print=False):  # TODO hard coded
-                    time.sleep(0.25)
-                logger.warn('Continuing...')
+    def _inference_reset_sampler(self):
+        self._sampler.reset()
+
+    def _inference_step(self, inference_step):
+        self._sampler.step(inference_step,
+                           take_random_actions=(inference_step <= self._onpolicy_after_n_steps),
+                           explore=True)
+        inference_step += self._sampler.n_envs
+        return inference_step
 
     def inference(self):
         ### restore where we left off
@@ -194,11 +207,10 @@ class AsyncGCG(GCG):
 
         self._run_rsync()
 
-        assert (self._eval_sampler is None)  # TODO: temporary
         train_rollouts = []
         eval_rollouts = []
 
-        self._reset_sampler()
+        self._inference_reset_sampler()
 
         timeit.reset()
         timeit.start('total')
@@ -210,21 +222,7 @@ class AsyncGCG(GCG):
             ### sample and add to buffer
             if inference_step > self._sample_after_n_steps:
                 timeit.start('sample')
-                try:
-                    self._sampler.step(inference_step,
-                                       take_random_actions=(inference_step <= self._learn_after_n_steps or
-                                                            inference_step <= self._onpolicy_after_n_steps),
-                                       explore=True)
-                    inference_step += self._sampler.n_envs
-                except Exception as e:
-                    logger.warn('Sampler exception {0}'.format(str(e)))
-                    trashed_steps = self._sampler.trash_current_rollouts()
-                    inference_step -= trashed_steps
-                    logger.warn('Trashed {0} steps'.format(trashed_steps))
-                    while not self._env.ros_is_good(print=False):  # TODO hard coded
-                        time.sleep(0.25)
-                    self._reset_sampler()
-                    logger.warn('Continuing...')
+                inference_step = self._inference_step(inference_step)
                 timeit.stop('sample')
             else:
                 inference_step += self._sampler.n_envs
@@ -258,15 +256,8 @@ class AsyncGCG(GCG):
 
             ### save rollouts / load model
             train_rollouts += self._sampler.get_recent_paths()
-            if inference_step > 0 and inference_step % self._inference_save_every_n_steps == 0 and \
-                            len(train_rollouts) > 0:
-                response = input('Keep rollouts?')
-                if response != 'y':
-                    train_rollouts = []
-                    continue
-
-                ### reset to stop rollout
-                self._sampler.reset()
+            if inference_step > 0 and inference_step % self._inference_save_every_n_steps == 0:
+                self._inference_reset_sampler()
 
                 ### save rollouts
                 logger.debug('Saving files for itr {0}'.format(inference_itr))
@@ -291,7 +282,7 @@ class AsyncGCG(GCG):
         self._save_inference(inference_itr, self._sampler.get_recent_paths(), eval_rollouts)
 
 
-def create_async_gcg(params, log_fname):
+def create_async_gcg(params, log_fname, AsyncClass=AsyncGCG):
     curr_dir = os.path.dirname(__file__)
     data_dir = os.path.join(curr_dir[:curr_dir.find('src/gcg')], 'data')
     assert (os.path.exists(data_dir))
@@ -333,7 +324,7 @@ def create_async_gcg(params, log_fname):
     ########################
 
     max_path_length = params['alg'].pop('max_path_length')
-    algo = AsyncGCG(
+    algo = AsyncClass(
         save_dir=save_dir,
         env=env,
         env_eval=env_eval,
@@ -345,12 +336,12 @@ def create_async_gcg(params, log_fname):
     return algo
 
 
-def run_async_gcg_train(params):
-    algo = create_async_gcg(params, log_fname='log_train.txt')
+def run_async_gcg_train(params, AsyncClass=AsyncGCG):
+    algo = create_async_gcg(params, log_fname='log_train.txt', AsyncClass=AsyncClass)
     algo.train()
 
 
-def run_async_gcg_inference(params):
+def run_async_gcg_inference(params, AsyncClass=AsyncGCG):
     # should only save minimal amount of rollouts in the replay buffer
     params = copy.deepcopy(params)
     params['alg']['offpolicy'] = None
@@ -358,5 +349,5 @@ def run_async_gcg_inference(params):
     params['alg']['replay_pool_size'] = int(1.5 * max_path_length)
     params['policy']['inference_only'] = True
 
-    algo = create_async_gcg(params, log_fname='log_inference.txt')
+    algo = create_async_gcg(params, log_fname='log_inference.txt', AsyncClass=AsyncClass)
     algo.inference()

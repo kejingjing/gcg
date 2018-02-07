@@ -33,11 +33,13 @@ class ReplayPool(object):
         ### buffer
         self._obs_im_shape = self._env_spec.observation_im_space.shape
         self._obs_im_dim = np.prod(self._obs_im_shape)
-        self._obs_vec_dim = len(list(self._env_spec.observation_vec_spec.keys())) 
+        self._obs_vec_dim = len(list(self._env_spec.observation_vec_spec.keys()))
+        self._goal_dim = len(list(self._env_spec.goal_spec.keys()))
         self._action_dim = self._env_spec.action_space.flat_dim
         self._steps = np.empty((self._size,), dtype=np.int32)
         self._observations_im = np.empty((self._size, self._obs_im_dim), dtype=np.uint8)
         self._observations_vec = np.ones((self._size, self._obs_vec_dim), dtype=np.float32)
+        self._goals = np.ones((self._size, self._goal_dim), dtype=np.float32)
         self._actions = np.nan * np.ones((self._size, self._action_dim), dtype=np.float32)
         self._rewards = np.nan * np.ones((self._size,), dtype=np.float32)
         self._dones = np.zeros((self._size,), dtype=bool) # initialize as all not done
@@ -87,10 +89,11 @@ class ReplayPool(object):
     ### Add to pool ###
     ###################
 
-    def store_observation(self, step, observation):
+    def store_observation(self, step, observation, goal):
         self._steps[self._index] = step
-        self._observations_im[self._index, :] = observation[0].reshape((self._obs_im_dim,)) #self._env_spec.observation_im_space.flatten(observation)
-        self._observations_vec[self._index, :] = observation[1].reshape((self._obs_vec_dim,)) #self._env_spec.observation_vec__space.flatten(observation)
+        self._observations_im[self._index, :] = observation[0].reshape((self._obs_im_dim,))
+        self._observations_vec[self._index, :] = observation[1].reshape((self._obs_vec_dim,))
+        self._goals[self._index, :] = goal
 
     def _encode_observation(self, index):
         """ Encodes observation starting at index by concatenating obs_history_len previous """
@@ -115,6 +118,7 @@ class ReplayPool(object):
         if self._last_done_index == self._index:
             return
 
+        self._done_indices.append(self._index - 1)
         indices = self._get_indices(self._last_done_index, self._index)
         rewards = self._rewards[indices]
 
@@ -128,10 +132,10 @@ class ReplayPool(object):
         self._actions[self._index, :] = self._env_spec.action_space.flatten(action) if flatten_action else action
         self._rewards[self._index] = reward
         if self._dones[self._index] and not done:
-            self._done_indices.remove(self._index)
             assert(self._curr_size + 1 >= self._size)
-        if done:
-            self._done_indices.append(self._index)
+            if self._index in self._done_indices:
+                self._done_indices.remove(self._index)
+
         self._dones[self._index] = done
         self._env_infos[self._index] = env_info if self._save_env_infos else None
         if self._sampling_method == 'uniform':
@@ -206,8 +210,13 @@ class ReplayPool(object):
         r_len = (self._index - self._last_done_index) % self._size
         if self._curr_size < self._size - 1: # TODO: not sure this is right
             self._curr_size -= r_len
+        
+        for index in range(self._last_done_index, self._index):
+            if index in self._done_indices:
+                self._done_indices.remove(index)
+        
         self._index = self._last_done_index
-        self._num_store_calls -= r_len
+
 
         return r_len
 
@@ -226,8 +235,6 @@ class ReplayPool(object):
             false_indices += self._get_indices(self._last_done_index, self._index)
 
         if self._sampling_method == 'uniform':
-            hits = 0.
-            tries= 0.
             while len(start_indices) < batch_size:
                 start_index = np.random.randint(low=0, high=len(self) - self._N)
                 if start_index not in false_indices:
@@ -260,7 +267,7 @@ class ReplayPool(object):
         if not self.can_sample():
             return None
 
-        steps, observations_im, observations_vec, actions, rewards, dones, env_infos = [], [], [], [], [], [], []
+        steps, observations_im, observations_vec, goals, actions, rewards, dones, env_infos = [], [], [], [], [], [], [], []
         
         start_indices = self._sample_start_indices(batch_size, only_completed_episodes)
 
@@ -270,6 +277,7 @@ class ReplayPool(object):
             obs_im_i, obs_vec_i = self._encode_observation(start_index)
             observations_im_i = np.vstack([obs_im_i, self._observations_im[indices[1:]]])
             observations_vec_i = np.vstack([obs_vec_i, self._observations_vec[indices[1:]]])
+            goals_i = self._goals[indices]
             actions_i = self._actions[indices]
             rewards_i = self._rewards[indices]
             dones_i = self._dones[indices]
@@ -298,6 +306,7 @@ class ReplayPool(object):
             steps.append(np.expand_dims(steps_i, 0))
             observations_im.append(np.expand_dims(observations_im_i, 0))
             observations_vec.append(np.expand_dims(observations_vec_i, 0))
+            goals.append(np.expand_dims(goals_i, 0))
             actions.append(np.expand_dims(actions_i, 0))
             rewards.append(np.expand_dims(rewards_i, 0))
             dones.append(np.expand_dims(dones_i, 0))
@@ -306,18 +315,19 @@ class ReplayPool(object):
         steps = np.vstack(steps)
         observations_im = np.vstack(observations_im)
         observations_vec = np.vstack(observations_vec)
+        goals = np.vstack(goals)
         actions = np.vstack(actions)
         rewards = np.vstack(rewards)
         dones = np.vstack(dones)
         env_infos = np.vstack(env_infos)
 
-        return steps, (observations_im, observations_vec), actions, rewards, dones, env_infos
+        return steps, (observations_im, observations_vec), goals, actions, rewards, dones, env_infos
 
     def sample_all_generator(self, batch_size, include_env_infos=False):
         if not self.can_sample():
             return
 
-        steps, observations_im, observations_vec, actions, rewards, dones, env_infos = [], [], [], [], [], [], []
+        steps, observations_im, observations_vec, goals, actions, rewards, dones, env_infos = [], [], [], [], [], [], [], []
 
         for start_index in range(len(self) - self._N):
             indices = self._get_indices(start_index, (start_index + self._N + 1) % self._curr_size)
@@ -326,6 +336,7 @@ class ReplayPool(object):
             obs_im_i, obs_vec_i = self._encode_observation(start_index)
             observations_im_i = np.vstack([obs_im_i, self._observations_im[indices[1:]]])
             observations_vec_i = np.vstack([obs_vec_i, self._observations_vec[indices[1:]]])
+            goals_i = self._goals[indices]
             actions_i = self._actions[indices]
             rewards_i = self._rewards[indices]
             dones_i = self._dones[indices]
@@ -337,17 +348,18 @@ class ReplayPool(object):
             steps.append(np.expand_dims(steps_i, 0))
             observations_im.append(np.expand_dims(observations_im_i, 0))
             observations_vec.append(np.expand_dims(observations_vec_i, 0))
+            goals.append(np.expand_dims(goals_i, 0))
             actions.append(np.expand_dims(actions_i, 0))
             rewards.append(np.expand_dims(rewards_i, 0))
             dones.append(np.expand_dims(dones_i, 0))
             env_infos.append(np.expand_dims(env_infos_i, 0))
 
             if len(steps) >= batch_size:
-                yield np.vstack(steps), (np.vstack(observations_im), np.vstack(observations_vec)),\
+                yield np.vstack(steps), (np.vstack(observations_im), np.vstack(observations_vec)), np.vstack(goals), \
                       np.vstack(actions), np.vstack(rewards), np.vstack(dones), np.vstack(env_infos)
-                steps, observations_im, observations_vec, actions, rewards, dones, env_infos = [], [], [], [], [], [], []
+                steps, observations_im, observations_vec, actions, rewards, dones, env_infos = [], [], [], [], [], [], [], []
 
-        yield np.vstack(steps), (np.vstack(observations_im), np.vstack(observations_vec)), \
+        yield np.vstack(steps), (np.vstack(observations_im), np.vstack(observations_vec)), np.vstack(goals), \
               np.vstack(actions), np.vstack(rewards), np.vstack(dones), np.vstack(env_infos)
 
     @staticmethod
@@ -356,7 +368,7 @@ class ReplayPool(object):
         if not np.any([replay_pool.can_sample() for replay_pool in replay_pools]):
             return None
 
-        steps, observations_im, observations_vec, actions, rewards, dones, env_infos = [], [], [], [], [], [], []
+        steps, observations_im, observations_vec, goals, actions, rewards, dones, env_infos = [], [], [], [], [], [], [], []
         
         # calculate ratio of pool sizes
         pool_lens = np.array([replay_pool.can_sample() * len(replay_pool) for replay_pool in replay_pools]).astype(float)
@@ -369,12 +381,13 @@ class ReplayPool(object):
             if batch_sizes[i] == 0:
                 continue
 
-            steps_i, (observations_im_i, observations_vec_i), actions_i, rewards_i, dones_i, env_infos_i = \
+            steps_i, (observations_im_i, observations_vec_i), goals_i, actions_i, rewards_i, dones_i, env_infos_i = \
                 replay_pool.sample(batch_sizes[i], include_env_infos=include_env_infos,
                                    only_completed_episodes=only_completed_episodes)
             steps.append(steps_i)
             observations_im.append(observations_im_i)
             observations_vec.append(observations_vec_i)
+            goals.append(goals_i)
             actions.append(actions_i)
             rewards.append(rewards_i)
             dones.append(dones_i)
@@ -383,16 +396,17 @@ class ReplayPool(object):
         steps = np.vstack(steps)
         observations_im = np.vstack(observations_im)
         observations_vec = np.vstack(observations_vec)
+        goals = np.vstack(goals)
         actions = np.vstack(actions)
         rewards = np.vstack(rewards)
         dones = np.vstack(dones)
         env_infos = np.vstack(env_infos)
 
-        for arr in (steps, observations_im, observations_vec, actions, rewards, dones, env_infos):
+        for arr in (steps, observations_im, observations_vec, goals, actions, rewards, dones, env_infos):
             assert(len(arr) == batch_size)
 
-        return steps, (observations_im, observations_vec), actions, rewards, dones, env_infos
-    
+        return steps, (observations_im, observations_vec), goals, actions, rewards, dones, env_infos
+
     ###############
     ### Logging ###
     ###############

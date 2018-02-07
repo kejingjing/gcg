@@ -13,7 +13,7 @@ class GCG(object):
     def __init__(self, **kwargs):
 
         self._save_dir = kwargs['save_dir']
-        self._load_dir = kwargs['load_dir']
+        self._load_dir = kwargs.get('load_dir', self._save_dir)
         self._env = kwargs['env']
         self._policy = kwargs['policy']
 
@@ -138,14 +138,14 @@ class GCG(object):
 
     def _get_train_itr(self):
         train_itr = 0
-        while len(glob.glob(self._inference_policy_file_name(train_itr) + '*')) > 0:
+        while len(glob.glob(os.path.splitext(self._inference_policy_file_name(train_itr))[0] + '*')) > 0:
             train_itr += 1
 
         return train_itr
 
     def _get_inference_itr(self):
         inference_itr = 0
-        while os.path.exists(self._train_rollouts_file_name(inference_itr)):
+        while len(glob.glob(self._train_rollouts_file_name(inference_itr) + '*')) > 0:
             inference_itr += 1
 
         return inference_itr
@@ -186,7 +186,7 @@ class GCG(object):
         :return: iteration that it is currently on
         """
         itr = 0
-        while len(glob.glob(self._load_inference_policy_file_name(itr) + '*')) > 0:
+        while len(glob.glob(os.path.splitext(self._load_inference_policy_file_name(itr))[0] + '*')) > 0:
             itr += 1
 
         if itr > 0:
@@ -248,22 +248,22 @@ class GCG(object):
                 if self._train_every_n_steps >= 1:
                     if step % int(self._train_every_n_steps) == 0:
                         timeit.start('batch')
-                        steps, observations, actions, rewards, dones, _ = \
+                        steps, observations, goals, actions, rewards, dones, _ = \
                             self._sampler.sample(self._batch_size)
                         timeit.stop('batch')
                         timeit.start('train')
-                        self._policy.train_step(step, steps=steps, observations=observations,
+                        self._policy.train_step(step, steps=steps, observations=observations, goals=goals,
                                                 actions=actions, rewards=rewards, dones=dones,
                                                 use_target=target_updated)
                         timeit.stop('train')
                 else:
                     for _ in range(int(1. / self._train_every_n_steps)):
                         timeit.start('batch')
-                        steps, observations, actions, rewards, dones, _ = \
+                        steps, observations, goals, actions, rewards, dones, _ = \
                             self._sampler.sample(self._batch_size)
                         timeit.stop('batch')
                         timeit.start('train')
-                        self._policy.train_step(step, steps=steps, observations=observations,
+                        self._policy.train_step(step, steps=steps, observations=observations, goals=goals,
                                                 actions=actions, rewards=rewards, dones=dones,
                                                 use_target=target_updated)
                         timeit.stop('train')
