@@ -92,20 +92,23 @@ class AsyncRWrccarGCG(AsyncGCG):
                 logger.warn('{0}: car never moved'.format(os.path.basename(fname)))
                 continue
             ### trim out initial negative encoders
-            if encoders.min() < 0:
-                start_idx = len(encoders) - (encoders[::-1] < 0).argmax()
-                prune(start_idx, None)
+            # if encoders.min() < 0:
+            #     start_idx = len(encoders) - (encoders[::-1] < 0).argmax()
+            #     prune(start_idx, None)
 
             ### prune based on when encoders goes zero (indicating a collision)
-            encoders = np.array([msg.data for msg in d_bag['encoder/both']])
-            is_encoder_collision = False
-            for t in range(len(encoders)-1, 0, -1):
-                if encoders[t-1] > 0 and abs(encoders[t]) < 1e-4:
-                    is_encoder_collision = True
-                    prune(None, t+1)
-                    break
-            if is_encoder_collision:
-                d_bag['collision/all'][-1].data = 1
+            # encoders = np.array([msg.data for msg in d_bag['encoder/both']])
+            # is_encoder_collision = False
+            # for t in range(len(encoders)-1, 0, -1):
+            #     if encoders[t-1] > 0 and abs(encoders[t]) < 1e-4:
+            #         is_encoder_collision = True
+            #         prune(None, t+1)
+            #         break
+            # if is_encoder_collision:
+            #     d_bag['collision/all'][-1].data = 1
+
+            if d_bag['collision/all'][-1].data != 1:
+                logger.warn('{0}: does not end in collision'.format(os.path.basename(fname)))
 
             bag_length = len(d_bag['mode'])
             if bag_length < 2:

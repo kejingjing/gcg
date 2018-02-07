@@ -182,7 +182,6 @@ class RWrccarEnv:
         self.observation_vec_spec = OrderedDict()
         self.goal_spec = OrderedDict()
 
-
         self.action_spec['steer'] = Box(low=-1., high=1.)
         self.action_spec['speed'] = Box(low=-0.3, high=0.3)
         self.action_space = Box(low=np.array([self.action_spec['steer'].low[0], self.action_spec['speed'].low[0]]),

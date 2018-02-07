@@ -63,8 +63,10 @@ class Sampler(object):
         ### store last observations and get encoded
         encoded_observations_im = []
         encoded_observations_vec = []
-        for i, (replay_pool, observation) in enumerate(zip(self._replay_pools, self._curr_observations)):
-            replay_pool.store_observation(step + i, observation)
+        for i, (replay_pool, observation, goal) in enumerate(zip(self._replay_pools,
+                                                                 self._curr_observations,
+                                                                 self._curr_goals)):
+            replay_pool.store_observation(step + i, observation, goal)
             encoded_observation = replay_pool.encode_recent_observation()
             encoded_observations_im.append(encoded_observation[0])
             encoded_observations_vec.append(encoded_observation[1])
