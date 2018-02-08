@@ -12,12 +12,13 @@ class RoomClutteredEnv(SquareEnv):
         self._goal_speed = 2.
         self._goal_heading = 0.
         self._base_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'models')
-        params.setdefault('model_path', os.path.join(self._base_dir, 'room.egg'))
-        params.setdefault('obj_paths', ['bookcase.egg', 'chair.egg', 'coffee_table.egg', 'desk.egg', 'stool.egg', 'table.egg'])
-        self._obj_paths = [os.path.join(self._base_dir, x) for x in params['obj_paths']]
-        
+        self._model_path = os.path.join(self._base_dir, 'room.egg')
+        self._setup_object_paths(['bookcase.egg', 'chair.egg', 'coffee_table.egg', 'desk.egg', 'stool.egg', 'table.egg'])
         self._obstacles = []
         SquareEnv.__init__(self, params=params)
+
+    def _setup_object_paths(self, obj_paths):
+        self._obj_paths = [os.path.join(self._base_dir, x) for x in obj_paths]
 
     def _setup_spec(self):
         SquareEnv._setup_spec(self)
@@ -27,6 +28,11 @@ class RoomClutteredEnv(SquareEnv):
     def _default_pos(self):
         return (20.0, -20., 0.3)
 
+    def _setup_collision_object(self, path, pos=(0.0, 0.0, 0.0), hpr=(0.0, 0.0, 0.0), scale=1, is_obstacle=False):
+        SquareEnv._setup_collision_object(self, path, pos, hpr, scale)
+        if is_obstacle:
+            self._obstacles.append((path, pos, hpr))
+    
     def _setup_map(self):
         index = 0
         max_len = len(self._obj_paths)
@@ -37,8 +43,7 @@ class RoomClutteredEnv(SquareEnv):
                 path = self._obj_paths[index % max_len]
                 angle = oris[(index // max_len) % 4]
                 hpr = (angle, 0.0, 0.0)
-                self._setup_collision_object(path, pos, hpr)
-                self._obstacles.append((path, pos, hpr))
+                self._setup_collision_object(path, pos, hpr, is_obstacle=True)
                 index += 1
         self._setup_collision_object(self._model_path)
 
@@ -47,13 +52,18 @@ class RoomClutteredEnv(SquareEnv):
         return goal
 
     def _get_reward(self):
-        if self._collision:
-            reward = self._collision_reward
+        if self._collision_only_reward:
+            if self._collision:
+                reward = -1.0
+            else:
+                reward = 0.0
         else:
-#            heading_reward = (np.cos(self._goal_heading[0] - self._get_heading()) + 1.) / 2.
-            heading_reward = np.cos(self._goal_heading - self._get_heading())
-            speed_reward = - (((self._goal_speed - self._get_speed()) / self._goal_speed) ** 2)
-            reward = heading_reward + speed_reward
+            if self._collision:
+                reward = self._collision_reward
+            else:
+                heading_reward = np.cos(self._goal_heading - self._get_heading())
+                speed_reward = - (((self._goal_speed - self._get_speed()) / self._goal_speed) ** 2)
+                reward = heading_reward + speed_reward
         assert(reward <= self.max_reward)
         return reward
 
@@ -102,14 +112,9 @@ class RoomClutteredEnv(SquareEnv):
         return self._get_observation(), self._get_goal()
 
     def _get_info(self):
-        info = {}
-        info['pos'] = np.array(self._vehicle_pointer.getPos())
-        info['hpr'] = np.array(self._vehicle_pointer.getHpr())
-        info['vel'] = self._get_speed()
+        info = SquareEnv._get_info(self)
         info['goal_h'] =  self._goal_heading
         info['goal_s'] = self._goal_speed
-        info['coll'] = self._collision
-        info['reward'] = self._get_reward() 
         info['obstacles'] = self._obstacles
         return info
 

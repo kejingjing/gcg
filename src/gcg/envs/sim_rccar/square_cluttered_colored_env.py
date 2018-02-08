@@ -4,7 +4,7 @@ from gcg.envs.sim_rccar.square_env import SquareEnv
 
 class SquareClutteredColoredEnv(SquareEnv):
     def __init__(self, params={}):
-        params.setdefault('model_path', os.path.join(os.path.dirname(os.path.abspath(__file__)), 'models/square_cluttered_colored.egg'))
+        self._model_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'models/square_cluttered_colored.egg')
 
         SquareEnv.__init__(self, params=params)
 

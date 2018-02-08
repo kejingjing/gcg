@@ -85,6 +85,7 @@ policy:
   get_action_test: # how to select actions at test time (i.e., when gathering samples)
     H: 1
     type: random # <random/lattice> action selection method
+    selection: argmax # <argmax/softmax>
     random:
       K: 4096
     lattice:
@@ -92,6 +93,7 @@ policy:
   get_action_target: # for computing target values
     H: 1
     type: random # <random/lattice>
+    selection: argmax # <argmax/softmax>
     random:
       K: 100
     lattice:
