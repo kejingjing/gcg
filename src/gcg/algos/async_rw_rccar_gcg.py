@@ -77,61 +77,17 @@ class AsyncRWrccarGCG(AsyncGCG):
             if len(colls) == 0:
                 logger.warn('{0}: empty bag'.format(os.path.basename(fname)))
                 continue
+            if colls.max() > 0 and colls[1] != 1:
+                logger.warn('{0}: has collision, but does not end in collision'.format(os.path.basename(fname)))
+                continue
 
-            def prune(start, end):
-                for key, value in d_bag.items():
-                    d_bag[key] = value[start:end]
-
-            ### prune based on collisions
-            if colls.max() > 0:
-                prune(None, colls.argmax() + 1)
-
-            encoders = np.array([msg.data for msg in d_bag['encoder/both']])
             ### make sure it moved at least a little bit
+            encoders = np.array([msg.data for msg in d_bag['encoder/both']])
             if (abs(encoders) > 1e-4).sum() < 2:
                 logger.warn('{0}: car never moved'.format(os.path.basename(fname)))
                 continue
-            ### trim out initial negative encoders
-            # if encoders.min() < 0:
-            #     start_idx = len(encoders) - (encoders[::-1] < 0).argmax()
-            #     prune(start_idx, None)
-
-            ### prune based on when encoders goes zero (indicating a collision)
-            # encoders = np.array([msg.data for msg in d_bag['encoder/both']])
-            # is_encoder_collision = False
-            # for t in range(len(encoders)-1, 0, -1):
-            #     if encoders[t-1] > 0 and abs(encoders[t]) < 1e-4:
-            #         is_encoder_collision = True
-            #         prune(None, t+1)
-            #         break
-            # if is_encoder_collision:
-            #     d_bag['collision/all'][-1].data = 1
-
-            if d_bag['collision/all'][-1].data != 1:
-                logger.warn('{0}: does not end in collision'.format(os.path.basename(fname)))
-
-            bag_length = len(d_bag['mode'])
-            if bag_length < 2:
-                logger.warn('{1}: length {0}'.format(bag_length, os.path.basename(fname)))
-                continue
-
-            ### some commands might be off by one, just append them
-            good_cmds = True
-            for key, value in d_bag.items():
-                if len(value) == bag_length:
-                    pass
-                elif len(value) == bag_length - 1:
-                    value.append(value[-1])
-                else:
-                    logger.warn('{0}: bad command length'.format(os.path.basename(fname)))
-                    good_cmds = False
-                    break
-
-            if not good_cmds:
-                continue
 
             ### update env and step
-
             def update_env(t):
                 for key in d_bag.keys():
                     try:
@@ -144,6 +100,7 @@ class AsyncRWrccarGCG(AsyncGCG):
                 logger.warn('Resetting!')
                 self._sampler.reset(offline=True)
 
+            bag_length = len(d_bag['mode'])
             for t in range(1, bag_length):
                 update_env(t)
                 action = np.array([d_bag['cmd/steer'][t-1].data, d_bag['cmd/vel'][t-1].data])
@@ -160,8 +117,6 @@ class AsyncRWrccarGCG(AsyncGCG):
 
         logger.info('Adding {0:d} timesteps ({1:.2f} kept)'.format(timesteps_kept, timesteps_kept / float(timesteps_total)))
 
-        # import IPython; IPython.embed()
-
     def _add_offpolicy(self, folders, max_to_add):
         for folder in folders:
             assert (os.path.exists(folder))
@@ -170,7 +125,6 @@ class AsyncRWrccarGCG(AsyncGCG):
             self._add_rosbags(rosbag_filenames)
         logger.info('Added {0} samples'.format(len(self._sampler)))
 
-    # TODO from rosbag
     def _restore_train_rollouts(self):
         """
         :return: iteration that it is currently on
@@ -205,7 +159,6 @@ class AsyncRWrccarGCG(AsyncGCG):
     ### Training methods ###
     ########################
 
-    # TODO from rosbag
     def _train_load_data(self, inference_itr):
         new_inference_itr = self._get_inference_itr()
         if inference_itr < new_inference_itr:

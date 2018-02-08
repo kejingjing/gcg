@@ -1,6 +1,5 @@
 import copy
 import numpy as np
-from gcg.envs.sim_rccar.car_env import CarEnv
 
 
 class VecEnvExecutor(object):

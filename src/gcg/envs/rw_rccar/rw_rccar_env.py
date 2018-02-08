@@ -1,5 +1,5 @@
 import os
-from collections import OrderedDict, deque
+from collections import OrderedDict
 import numpy as np
 # import cv2
 from PIL import Image
@@ -96,7 +96,6 @@ class RWrccarEnv:
         params.setdefault('backup_steer_range', (-0.8, 0.8))
         params.setdefault('press_enter_on_reset', False)
 
-        # TODO
         self._use_vel = True
         self._obs_shape = params['obs_shape']
         self._steer_limits = params['steer_limits']
@@ -140,9 +139,6 @@ class RWrccarEnv:
             ('mode', std_msgs.msg.Int32),
             ('steer', std_msgs.msg.Float32),
             ('motor', std_msgs.msg.Float32),
-            ('battery/a', std_msgs.msg.Float32),
-            ('battery/b', std_msgs.msg.Float32),
-            ('battery/low', std_msgs.msg.Int32),
             ('encoder/left', std_msgs.msg.Float32),
             ('encoder/right', std_msgs.msg.Float32),
             ('encoder/both', std_msgs.msg.Float32),
@@ -158,7 +154,6 @@ class RWrccarEnv:
             ('cmd/motor', std_msgs.msg.Float32),
             ('cmd/vel', std_msgs.msg.Float32)
         ])
-        self._collision_stuck_deque = deque([], 3)
         self._ros_msgs = dict()
         self._ros_msg_times = dict()
         for topic, type in self._ros_topics_and_types.items():
@@ -276,8 +271,11 @@ class RWrccarEnv:
             assert (self.ros_is_good())
 
         action = np.asarray(action)
-        assert (np.logical_and(action >= self.action_space.low,
-                               action <= self.action_space.high).all())
+        if not (np.logical_and(action >= self.action_space.low, action <= self.action_space.high).all()):
+            logger.warn('Action {0} will be clipped to be within bounds: {1}, {2}'.format(action,
+                                                                                          self.action_space.low,
+                                                                                          self.action_space.high))
+            action = np.clip(action, self.action_space.low, self.action_space.high)
 
         cmd_steer, cmd_vel = action
         self._set_steer(cmd_steer)
@@ -340,6 +338,8 @@ class RWrccarEnv:
 
         rospy.sleep(0.5)
 
+        self._ros_msgs.clear()
+        self._ros_msg_times.clear()
         self._last_step_time = rospy.Time.now()
         self._is_collision = False
         self._t = 0
@@ -356,22 +356,18 @@ class RWrccarEnv:
 
     def ros_msg_update(self, msg, args):
         topic = args[0]
-        self._ros_msgs[topic] = msg
-        self._ros_msg_times[topic] = rospy.Time.now()
 
-        if topic == 'collision/all':
-            #is_collision_stuck = (np.all(self._collision_stuck_deque) and self._t > 2) if len(self._collision_stuck_deque) == self._collision_stuck_deque.maxlen else False
-            #is_collision_bumper = self._ros_msgs['collision/bumper'].data if 'collision/bumper' in self._ros_msgs else False
-            #is_collision_flip = self._ros_msgs['collision/flip'].data if 'collision/flip' in self._ros_msgs else False
-            #is_collision_jolt = self._ros_msgs['collision/jolt'].data if 'collision/jolt' in self._ros_msgs else False
-            #if is_collision_bumper or is_collision_flip or is_collision_jolt or (is_collision_stuck and self._t > 8):
-            #    self._is_collision = True
-            if msg.data == 1:
+        # if a collision, stop updating msg once a collision is seen
+        if 'collision' in topic:
+            if self._ros_msgs[topic].data != 1:
+                self._ros_msgs[topic] = msg
+                self._ros_msg_times[topic] = rospy.Time.now()
+
+            if self._ros_msgs[msg].data == 1:
                 self._is_collision = True
-        elif topic == 'collision/stuck':
-            self._collision_stuck_deque.append(msg.data)
-                # if 'collision' in topic and msg.data == 1 and 'all' not in topic:
-                #    logger.debug(topic)
+        else:
+            self._ros_msgs[topic] = msg
+            self._ros_msg_times[topic] = rospy.Time.now()
 
     def ros_is_good(self, print=True):
         # check that all not commands are coming in at a continuous rate
@@ -380,20 +376,13 @@ class RWrccarEnv:
                 elapsed = (rospy.Time.now() - self._ros_msg_times[topic]).to_sec()
                 if elapsed > self._dt:
                     if print:
-                        logger.debug(
-                            'Topic {0} was received {1} seconds ago (dt is {2})'.format(topic, elapsed, self._dt))
+                        logger.debug('Topic {0} was received {1} seconds ago (dt is {2})'.format(topic, elapsed, self._dt))
                     return False
 
         # check if in python mode
         if self._ros_msgs.get('mode') is None or self._ros_msgs['mode'].data != 2:
             if print:
                 logger.debug('In mode {0}'.format(self._ros_msgs.get('mode')))
-            return False
-
-        # check if battery is low
-        if self._ros_msgs.get('battery/low') is None or self._ros_msgs['battery/low'].data == 1:
-            if print:
-                logger.debug('Low battery!')
             return False
 
         return True
