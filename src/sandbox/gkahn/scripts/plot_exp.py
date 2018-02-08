@@ -10,27 +10,36 @@ from gcg.analyze.experiment import ExperimentGroup, MultiExperimentComparison
 from gcg.data.logger import logger
 from gcg.data import mypickle
 
-DATA_DIR = os.path.join(os.path.dirname(os.path.realpath(__file__)), '../data')
+CURR_DIR = os.path.realpath(os.path.dirname(__file__))
+DATA_DIR = os.path.join(CURR_DIR[:CURR_DIR.find('src/sandbox')], 'data')
 
 def plot_test():
-    label_params = [['exp', ('exp_name',)],
-                    ['H' ,('policy', 'H')],
-                    ['K', ('policy', 'get_action_test', 'random', 'K')]]
+    label_params = [['exp', ('exp_name',)]]
 
     experiment_groups = [
-        ExperimentGroup(os.path.join(DATA_DIR, 'sim_rccar/ours'),
+        ExperimentGroup(os.path.join(DATA_DIR, 'sim_rccar/benchmarks/coll_dql'),
                         label_params=label_params,
                         plot={
-                            'color': 'r'
+                            'color': 'k'
+                        }),
+        ExperimentGroup(os.path.join(DATA_DIR, 'sim_rccar/benchmarks/coll_ours_bootstrap'),
+                        label_params=label_params,
+                        plot={
+                            'color': 'b'
+                        }),
+        ExperimentGroup(os.path.join(DATA_DIR, 'sim_rccar/benchmarks/coll_ours'),
+                        label_params=label_params,
+                        plot={
+                            'color': 'g'
                         }),
     ]
 
     mec = MultiExperimentComparison(experiment_groups)
 
-    mec.plot_csv(['EvalCumRewardMean'],
+    mec.plot_csv(['EvalEpisodeLengthMean'],
                  save_path=None,
                  plot_std=True,
-                 avg_window=None,
+                 avg_window=50,
                  xlim=None,
                  ylim=None)
 
@@ -213,5 +222,5 @@ if __name__ == '__main__':
                  log_path='/tmp/log.txt',
                  lvl='debug')
 
-    # plot_test()
-    plot_rw_rccar_var001_var016()
+    plot_test()
+    # plot_rw_rccar_var001_var016()
