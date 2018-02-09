@@ -3,11 +3,13 @@ import os
 from gcg.envs.sim_rccar.room_cluttered_env import RoomClutteredEnv
 
 class SimpleRoomClutteredEnv(RoomClutteredEnv):
-    def __init__(self, params={}):
-        self._base_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'models')
-        self._model_path = os.path.join(self._base_dir, 'small_room.egg')
-        self._setup_object_paths(['bookcase.egg'])
-        RoomClutteredEnv.__init__(self, params=params)
+    @property
+    def _model_path(self): 
+        return os.path.join(self._base_dir, 'small_room.egg')
+
+    def _setup_object_paths(self):
+        obj_paths = ['bookcase.egg']
+        self._obj_paths = [os.path.join(self._base_dir, x) for x in obj_paths]
 
     def _setup_map(self):
         # TODO maybe stagger

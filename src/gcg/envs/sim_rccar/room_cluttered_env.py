@@ -11,13 +11,16 @@ class RoomClutteredEnv(SquareEnv):
         #TODO
         self._goal_speed = 2.
         self._goal_heading = 0.
-        self._base_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'models')
-        self._model_path = os.path.join(self._base_dir, 'room.egg')
-        self._setup_object_paths(['bookcase.egg', 'chair.egg', 'coffee_table.egg', 'desk.egg', 'stool.egg', 'table.egg'])
         self._obstacles = []
+        self._setup_object_paths()
         SquareEnv.__init__(self, params=params)
-
-    def _setup_object_paths(self, obj_paths):
+    
+    @property
+    def _model_path(self): 
+        return os.path.join(self._base_dir, 'room.egg')
+    
+    def _setup_object_paths(self):
+        obj_paths = ['bookcase.egg', 'chair.egg', 'coffee_table.egg', 'desk.egg', 'stool.egg', 'table.egg']
         self._obj_paths = [os.path.join(self._base_dir, x) for x in obj_paths]
 
     def _setup_spec(self):
@@ -52,7 +55,7 @@ class RoomClutteredEnv(SquareEnv):
         return goal
 
     def _get_reward(self):
-        if self._collision_only_reward:
+        if self._collision_reward_only:
             if self._collision:
                 reward = -1.0
             else:

@@ -6,10 +6,9 @@ from panda3d.core import BitMask32
 from gcg.envs.sim_rccar.square_env import SquareEnv
 
 class SquareClutteredEnv(SquareEnv):
-    def __init__(self, params={}):
-        self._model_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'models/square_cluttered.egg')
-
-        SquareEnv.__init__(self, params=params)
+    @property
+    def _model_path(self):
+        return os.path.join(self._base_dir, 'models/square_cluttered.egg')
 
     def _setup_collision_object(self, path, pos=(0.0, 0.0, 0.0), hpr=(0.0, 0.0, 0.0), scale=1):
         visNP = loader.loadModel(path)

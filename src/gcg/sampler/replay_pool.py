@@ -183,7 +183,7 @@ class ReplayPool(object):
 
         r_len = len(rollout['dones'])
         for i in range(r_len):
-            self.store_observation(start_step + i, (rollout['observations_im'][i], rollout['observations_vec'][i]))
+            self.store_observation(start_step + i, (rollout['observations_im'][i], rollout['observations_vec'][i], rollout['goals'][i]))
             self.store_effect(rollout['actions'][i],
                               rollout['rewards'][i],
                               rollout['dones'][i],
@@ -430,6 +430,7 @@ class ReplayPool(object):
                 'steps': self._steps[indices],
                 'observations_im': self._observations_im[indices] if self._save_rollouts_observations else None,
                 'observations_vec': self._observations_vec[indices] if self._save_rollouts_observations else None,
+                'goals': self._goals[indices] if self._save_rollouts_observations else None,
                 'actions': self._actions[indices],
                 'rewards': self._rewards[indices],
                 'dones': self._dones[indices],

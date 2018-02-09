@@ -3,11 +3,13 @@ import os, random
 from gcg.envs.sim_rccar.room_cluttered_env import RoomClutteredEnv
 
 class ForestEnv(RoomClutteredEnv):
-    def __init__(self, params={}):
-        self._base_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'models')
-        self._model_path = os.path.join(self._base_dir, 'outdoors.egg')
-        self._setup_object_paths(['rock4.egg', 'rock5.egg', 'tree8.egg', 'tree9.egg'])
-        RoomClutteredEnv.__init__(self, params=params)
+    @property
+    def _model_path(self): 
+        return os.path.join(self._base_dir, 'outdoors.egg')
+
+    def _setup_object_paths(self):
+        obj_paths = ['rock4.egg', 'rock5.egg', 'tree8.egg', 'tree9.egg']
+        self._obj_paths = [os.path.join(self._base_dir, x) for x in obj_paths]
 
     def _setup_map(self):
         # TODO maybe stagger

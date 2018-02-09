@@ -1,9 +1,10 @@
 import sys
 from math import pi
 from collections import OrderedDict
-
 import cv2
 import numpy as np
+import os
+
 from direct.showbase.DirectObject import DirectObject
 from direct.showbase.ShowBase import ShowBase
 from panda3d.bullet import BulletBoxShape
@@ -204,6 +205,10 @@ class CarEnv(DirectObject):
         self.observation_vec_spec['coll'] = Discrete(1)
         self.observation_vec_spec['heading'] = Box(low=0, high=2 * 3.14)
         self.observation_vec_spec['speed'] = Box(low=-4.0, high=4.0)
+
+    @property
+    def _base_dir(self):
+        return os.path.join(os.path.dirname(os.path.abspath(__file__)), 'models')
 
     @property
     def horizon(self):

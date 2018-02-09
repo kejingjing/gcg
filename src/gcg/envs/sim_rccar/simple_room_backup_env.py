@@ -5,11 +5,10 @@ import numpy as np
 from gcg.envs.sim_rccar.room_cluttered_env import RoomClutteredEnv
 
 class SimpleRoomBackupEnv(RoomClutteredEnv):
-    def __init__(self, params={}):
-        self._base_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'models')
-        self._model_path = os.path.join(self._base_dir, 'backup_room.egg')
-        RoomClutteredEnv.__init__(self, params=params)
-
+    @property
+    def _model_path(self):
+        return os.path.join(self._base_dir, 'backup_room.egg')
+   
     def _setup_map(self):
         self._setup_collision_object(self._model_path)
 
@@ -25,6 +24,17 @@ class SimpleRoomBackupEnv(RoomClutteredEnv):
     @property
     def horizon(self):
         return 45
+
+    def step(self, action):
+        # TODO hack
+        new_action = [action[0]]
+        if action[1] >= 0.0:
+            new_action.append(2.0)
+        else:
+            new_action.append(-2.0)
+        new_action = np.array(new_action)
+        return RoomClutteredEnv.step(self, new_action)
+
 
     def _get_reward(self):
         if self._collision:
