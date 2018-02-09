@@ -429,19 +429,30 @@ class GCGPolicy(object):
         """
         batch_size = tf.shape(tf_actions)[0]
 
+        ### whiten the actions
+        action_space = self._env_spec.action_space
+        action_mean = np.tile(0.5 * (action_space.low + action_space.high), (self._H, 1))
+        action_scale = np.tile(action_space.high - action_space.low, (self._H, 1))
+        tf_actions_explore = (tf_actions - action_mean) / action_scale
+
         ### order below matters (gaussian before epsilon greedy, in case you do both types)
-        tf_actions_explore = tf_actions
         if self._gaussian_es:
             tf_explore_ph = tf_es_ph_dict['gaussian']
-            tf_actions_explore = tf.clip_by_value(tf_actions_explore + tf.random_normal(tf.shape(tf_actions_explore)) *
-                                                  tf.tile(tf.expand_dims(tf_explore_ph, 1), (1, self._action_dim)),
-                                                  self._env_spec.action_selection_space.low,
-                                                  self._env_spec.action_selection_space.high)
+            tf_actions_explore = tf_actions_explore + tf.random_normal(tf.shape(tf_actions_explore)) * \
+                                 tf.tile(tf.expand_dims(tf_explore_ph, 1), (1, self._action_dim))
+
+        ### de-whiten the actions
+        tf_actions_explore = (action_scale * tf_actions_explore) + action_mean
+        tf_actions_explore = tf.clip_by_value(tf_actions_explore,
+                                              self._env_spec.action_selection_space.low,
+                                              self._env_spec.action_selection_space.high)
+
+        # (de-whiten before epsilon greedy)    
         if self._epsilon_greedy_es:
             tf_explore_ph = tf_es_ph_dict['epsilon_greedy']
             mask = tf.cast(tf.tile(tf.expand_dims(tf.random_uniform([batch_size]) < tf_explore_ph, 1), (1, self._action_dim)), tf.float32)
             tf_actions_explore = (1 - mask) * tf_actions_explore + mask * self._graph_generate_random_actions(batch_size)
-
+            
         return tf_actions_explore
 
     def _graph_cost(self, values, yhats, bhats, tf_obs_vec_target_ph, tf_rewards_ph, tf_dones_ph, target_inputs, target_values, target_yhats, target_bhats, N=None):      
