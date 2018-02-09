@@ -210,5 +210,5 @@ def run_async_rw_rccar_gcg_train(params, is_continue):
     run_async_gcg_train(params, is_continue, AsyncClass=AsyncRWrccarGCG)
 
 
-def run_async_rw_rccar_gcg_inference(params):
+def run_async_rw_rccar_gcg_inference(params, is_continue):
     run_async_gcg_inference(params, is_continue, AsyncClass=AsyncRWrccarGCG)
