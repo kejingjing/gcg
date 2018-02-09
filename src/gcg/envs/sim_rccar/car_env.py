@@ -361,7 +361,6 @@ class CarEnv(DirectObject):
         self._vehicle.setBrake(self._brakeForce, 1)
         self._vehicle.setBrake(self._brakeForce, 2)
         self._vehicle.setBrake(self._brakeForce, 3)
-
         if dt >= self._step:
             # TODO maybe change number of timesteps
 #            for i in range(int(dt/self._step)):

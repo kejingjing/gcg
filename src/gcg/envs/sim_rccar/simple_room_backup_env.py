@@ -30,7 +30,7 @@ class SimpleRoomBackupEnv(RoomClutteredEnv):
         if self._collision:
             reward = self._collision_reward
         else:
-            lb, ub = self.unnormalized_action_space.bounds
+            lb, ub = self.action_space.bounds
             reward = np.cos(self._goal_heading - self._get_heading()) * np.maximum(self._get_speed() / ub[1], 0.)
         assert(reward <= self.max_reward)
         return reward
