@@ -153,7 +153,7 @@ class AsyncRWrccarGCG(AsyncGCG):
 
     @property
     def _rsync_send_includes(self):
-        return super(AsyncRWrccarGCG, self)._rsync_send_includes + ['rosbags/']
+        return super(AsyncRWrccarGCG, self)._rsync_send_includes + ['rosbags/'] + ['rosbags/*.bag']
 
     ########################
     ### Training methods ###
@@ -172,10 +172,10 @@ class AsyncRWrccarGCG(AsyncGCG):
 
         return inference_itr
 
-    def _inference_reset_sampler(self):
+    def _inference_reset_sampler(self, keep_rosbag=True):
         while True:
             try:
-                self._sampler.reset()
+                self._sampler.reset(keep_rosbag=keep_rosbag)
                 break
             except Exception as e:
                 logger.warn('Reset exception {0}'.format(str(e)))
@@ -196,7 +196,7 @@ class AsyncRWrccarGCG(AsyncGCG):
             logger.warn('Trashed {0} steps'.format(trashed_steps))
             while not self._env.ros_is_good(print=False):
                 time.sleep(0.25)
-            self._reset_sampler()
+            self._inference_reset_sampler(keep_rosbag=False)
             logger.warn('Continuing...')
 
         return inference_step

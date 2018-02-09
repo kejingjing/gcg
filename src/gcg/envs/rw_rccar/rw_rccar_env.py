@@ -89,7 +89,7 @@ class RWrccarEnv:
         params.setdefault('horizon', int(5. * 60. / params['dt']))  # 5 minutes worth
         params.setdefault('ros_namespace', '/rccar/')
         params.setdefault('obs_shape', (36, 64, 1))
-        params.setdefault('steer_limits', [-1., 1.])
+        params.setdefault('steer_limits', [-0.9, 0.9])
         params.setdefault('speed_limits', [0.2, 0.2])
         params.setdefault('backup_motor', -0.22)
         params.setdefault('backup_duration', 1.6)
@@ -169,8 +169,23 @@ class RWrccarEnv:
         self._ros_rolloutbag = RolloutRosbag()
         self._t = 0
 
-        rospy.sleep(1)
+        logger.debug('Waiting for all topics to be received once...')
+        while not rospy.is_shutdown():
+            rospy.sleep(0.5)
+            
+            not_found = False
+            for topic in self._ros_topics_and_types.keys():
+                if 'cmd' in topic:
+                    continue
+                if topic not in self._ros_msgs or topic not in self._ros_msg_times:
+                    logger.debug('{0}: not found'.format(topic))
+                    not_found = True
+                    break
 
+            if not_found is False:
+                break
+        logger.debug('All good')
+            
     def _setup_spec(self):
         self.action_spec = OrderedDict()
         self.action_selection_spec = OrderedDict()
@@ -302,17 +317,20 @@ class RWrccarEnv:
 
         return next_observation, goal, reward, done, env_info
 
-    def reset(self, offline=False):
+    def reset(self, offline=False, keep_rosbag=False):
         if offline:
             self._is_collision = False
             return self._get_observation(), self._get_goal()
 
         assert (self.ros_is_good())
-
+        
         if self._ros_rolloutbag.is_open:
-            # should've been closed in step when done
-            logger.debug('Trashing bag')
-            self._ros_rolloutbag.trash()
+            if keep_rosbag:
+                self._ros_rolloutbag.close()
+            else:
+                # should've been closed in step when done
+                logger.debug('Trashing bag')
+                self._ros_rolloutbag.trash()
 
         if self._press_enter_on_reset:
             logger.info('Resetting, press enter to continue')
@@ -323,13 +341,6 @@ class RWrccarEnv:
             else:
                 logger.debug('Resetting (no collision)')
 
-            if self._ros_msgs['collision/flip'].data:
-                logger.warn('Car has flipped, please unflip it to continue')
-                while self._ros_msgs['collision/flip'].data:
-                    rospy.sleep(0.1)
-                logger.warn('Car is now unflipped. Continuing...')
-                rospy.sleep(1.)
-
             backup_steer = np.random.uniform(*self._backup_steer_range)
             self._set_steer(backup_steer)
             self._set_motor(self._backup_motor, self._backup_duration)
@@ -338,8 +349,6 @@ class RWrccarEnv:
 
         rospy.sleep(0.5)
 
-        self._ros_msgs.clear()
-        self._ros_msg_times.clear()
         self._last_step_time = rospy.Time.now()
         self._is_collision = False
         self._t = 0
@@ -357,14 +366,25 @@ class RWrccarEnv:
     def ros_msg_update(self, msg, args):
         topic = args[0]
 
-        # if a collision, stop updating msg once a collision is seen
+
         if 'collision' in topic:
-            if self._ros_msgs[topic].data != 1:
+            if msg.data == 1:
+                self._is_collision = True
+
+            if self._is_collision:
+                if msg.data == 1:
+                    # if is_collision and current is collision, update
+                    self._ros_msgs[topic] = msg
+                    self._ros_msg_times[topic] = rospy.Time.now()
+                else:
+                    if self._ros_msgs[topic].data != 1:
+                        # if is collision, but previous message is not collision, then this topic didn't cause a colision
+                        self._ros_msgs[topic] = msg
+                        self._ros_msg_times[topic] = rospy.Time.now()
+            else:
+                # always update if not in collision
                 self._ros_msgs[topic] = msg
                 self._ros_msg_times[topic] = rospy.Time.now()
-
-            if self._ros_msgs[msg].data == 1:
-                self._is_collision = True
         else:
             self._ros_msgs[topic] = msg
             self._ros_msg_times[topic] = rospy.Time.now()
@@ -385,4 +405,10 @@ class RWrccarEnv:
                 logger.debug('In mode {0}'.format(self._ros_msgs.get('mode')))
             return False
 
+        if self._ros_msgs['collision/flip'].data:
+            if print:
+                logger.warn('Car has flipped, please unflip it to continue')
+            self._is_collision = False # otherwise will stay flipped forever
+            return False
+        
         return True
