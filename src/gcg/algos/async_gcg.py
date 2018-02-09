@@ -125,11 +125,11 @@ class AsyncGCG(GCG):
 
     def train(self):
         ### restore where we left off
+        init_inference_step = len(self._sampler) # don't count offpolicy
         self._restore_train()
         train_itr = self._get_train_itr()
         train_step = self._get_train_step()
         inference_itr = self._get_inference_itr()
-        init_inference_step = len(self._sampler)
 
         target_updated = False
 
