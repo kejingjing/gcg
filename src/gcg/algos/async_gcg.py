@@ -1,4 +1,4 @@
-import os, copy, time
+import os, sys, copy, time
 import threading
 
 from gcg.envs.env_utils import create_env
@@ -282,11 +282,14 @@ class AsyncGCG(GCG):
         self._save_inference(inference_itr, self._sampler.get_recent_paths(), eval_rollouts)
 
 
-def create_async_gcg(params, log_fname, AsyncClass=AsyncGCG):
+def create_async_gcg(params, is_continue, log_fname, AsyncClass=AsyncGCG):
     curr_dir = os.path.dirname(__file__)
     data_dir = os.path.join(curr_dir[:curr_dir.find('src/gcg')], 'data')
     assert (os.path.exists(data_dir))
     save_dir = os.path.join(data_dir, params['exp_name'])
+    if os.path.exists(save_dir) and not is_continue:
+        print('Save directory {0} exists. You need to explicitly say to continue if you want to start training from where you left off'.format(save_dir))
+        sys.exit(0)
     os.makedirs(save_dir, exist_ok=True)
     logger.setup(display_name=params['exp_name'],
                  log_path=os.path.join(save_dir, log_fname),
@@ -299,8 +302,8 @@ def create_async_gcg(params, log_fname, AsyncClass=AsyncGCG):
 
     os.environ["CUDA_VISIBLE_DEVICES"] = str(params['policy']['gpu_device'])  # TODO: hack so don't double GPU
 
-    env_str = params['alg'].pop('env')
-    env = create_env(env_str, seed=params['seed'])
+    env_dict = params['alg'].pop('env')
+    env = create_env(env_dict, seed=params['seed'])
 
     env_eval = None
 
@@ -330,18 +333,18 @@ def create_async_gcg(params, log_fname, AsyncClass=AsyncGCG):
         env_eval=env_eval,
         policy=policy,
         max_path_length=max_path_length,
-        env_str=env_str,
+        env_dict=env_dict,
         **params['alg']
     )
     return algo
 
 
-def run_async_gcg_train(params, AsyncClass=AsyncGCG):
-    algo = create_async_gcg(params, log_fname='log_train.txt', AsyncClass=AsyncClass)
+def run_async_gcg_train(params, is_continue, AsyncClass=AsyncGCG):
+    algo = create_async_gcg(params, is_continue, log_fname='log_train.txt', AsyncClass=AsyncClass)
     algo.train()
 
 
-def run_async_gcg_inference(params, AsyncClass=AsyncGCG):
+def run_async_gcg_inference(params, is_continue, AsyncClass=AsyncGCG):
     # should only save minimal amount of rollouts in the replay buffer
     params = copy.deepcopy(params)
     params['alg']['offpolicy'] = None
@@ -349,5 +352,5 @@ def run_async_gcg_inference(params, AsyncClass=AsyncGCG):
     params['alg']['replay_pool_size'] = int(1.5 * max_path_length)
     params['policy']['inference_only'] = True
 
-    algo = create_async_gcg(params, log_fname='log_inference.txt', AsyncClass=AsyncClass)
+    algo = create_async_gcg(params, is_continue, log_fname='log_inference.txt', AsyncClass=AsyncClass)
     algo.inference()

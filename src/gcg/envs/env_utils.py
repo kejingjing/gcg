@@ -11,12 +11,13 @@ try:
 except:
     print('Not importing sim_rccar')
 
-#try:
-from gcg.envs.rw_rccar.rw_rccar_env import RWrccarEnv
-#except:
-#    print('Not importing rw_rccar')
+try:
+    from gcg.envs.rw_rccar.rw_rccar_env import RWrccarEnv
+except:
+    print('Not importing rw_rccar')
 
-def create_env(env_str, seed=None):
-    env = eval(env_str)
+def create_env(env_dict, seed=None):
+    EnvClass = eval(env_dict['class'])
+    env = EnvClass(params=env_dict['params'])
 
     return env

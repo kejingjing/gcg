@@ -12,8 +12,20 @@ log_level: debug
 alg:
 
   ### Environment ###
-  env: "SquareClutteredEnv(params={'do_back_up': True, 'collision_reward_only': True, 'collision_reward': -1, 'speed_limits': [2., 2.]})"
-  env_eval: "SquareClutteredEnv(params={'do_back_up': False, 'collision_reward_only': True, 'collision_reward': -1, 'speed_limits': [2., 2.]})"
+  env:
+      class: SquareClutteredEnv
+      params:
+        do_back_up: True
+        collision_reward_only: True
+        collision_reward: -1.0
+        speed_limits: [2.0, 2.0]
+  env_eval:
+    class: SquareClutteredEnv
+    params:
+      do_back_up: False
+      collision_reward_only: True
+      collision_reward: -1.0
+      speed_limits: [2.0, 2.0]
   n_envs: 1 # number of training environments
 
   ### Offpolicy data ###

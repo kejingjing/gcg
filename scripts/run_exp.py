@@ -6,6 +6,7 @@ from gcg.algos.gcg import run_gcg
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--exps', nargs='+')
+parser.add_argument('--continue', action='store_true')
 args = parser.parse_args()
 
 for exp in args.exps:
@@ -17,4 +18,4 @@ for exp in args.exps:
         params_txt = ''.join(f.readlines())
     params['txt'] = params_txt
 
-    run_gcg(params)
+    run_gcg(params, getattr(args, 'continue'))

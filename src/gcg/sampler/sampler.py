@@ -12,7 +12,7 @@ from gcg.data import mypickle
 
 class Sampler(object):
     def __init__(self, policy, env, n_envs, replay_pool_size, max_path_length, sampling_method,
-                 save_rollouts=False, save_rollouts_observations=True, save_env_infos=False, env_str=None, replay_pool_params={}):
+                 save_rollouts=False, save_rollouts_observations=True, save_env_infos=False, env_dict=None, replay_pool_params={}):
         self._policy = policy
         self._n_envs = n_envs
 
@@ -37,7 +37,7 @@ class Sampler(object):
             try:
                 envs = [pickle.loads(pickle.dumps(env)) for _ in range(self._n_envs)] if self._n_envs > 1 else [env]
             except:
-                envs = [create_env(env_str) for _ in range(self._n_envs)] if self._n_envs > 1 else [env]
+                envs = [create_env(env_dict) for _ in range(self._n_envs)] if self._n_envs > 1 else [env]
         ### need to seed each environment if it is GymEnv
         # TODO: set seed
         self._vec_env = VecEnvExecutor(

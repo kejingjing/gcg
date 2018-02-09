@@ -10,18 +10,24 @@ alg:
 
   async:
     train:
-      save_every_n_steps: 2.e+3 # about every 5 minutes
-      reset_every_n_steps: # 1.e+5 # about every 50 minutes
+      save_every_n_steps: 6.e+3
+      reset_every_n_steps: 
 
     inference:
       ssh: "gkahn@ahsoka.banatao.berkeley.edu"
       remote_dir: "/home/gkahn/code/gcg/data"
 
-      save_every_n_steps: 50 # TODO 3.e+2 # for dt = 0.25, this is about 1.25 minutes
+      save_every_n_steps: 3.e+2 # for dt = 0.25, this is about 1.25 minutes
 
   ### Environment ###
 
-  env: "RWrccarEnv(params={'speed_limits': [0.2, 0.2], 'press_enter_on_reset': False, 'collision_reward_only': True, 'collision_reward': -1, 'obs_shape': (36, 64, 1)})"
+  env:
+    class: RWrccarEnv
+    params:
+      speed_limits: [0.2, 0.2]
+      collision_reward_only: True
+      collision_reward: -1
+      obs_shape: [36, 64, 1]
   max_path_length: 1000
   n_envs: 1 # number of training environments
   render: False

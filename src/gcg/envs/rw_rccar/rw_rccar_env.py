@@ -168,23 +168,6 @@ class RWrccarEnv:
 
         self._ros_rolloutbag = RolloutRosbag()
         self._t = 0
-
-        logger.debug('Waiting for all topics to be received once...')
-        while not rospy.is_shutdown():
-            rospy.sleep(0.5)
-            
-            not_found = False
-            for topic in self._ros_topics_and_types.keys():
-                if 'cmd' in topic:
-                    continue
-                if topic not in self._ros_msgs or topic not in self._ros_msg_times:
-                    logger.debug('{0}: not found'.format(topic))
-                    not_found = True
-                    break
-
-            if not_found is False:
-                break
-        logger.debug('All good')
             
     def _setup_spec(self):
         self.action_spec = OrderedDict()
@@ -393,6 +376,10 @@ class RWrccarEnv:
         # check that all not commands are coming in at a continuous rate
         for topic in self._ros_topics_and_types.keys():
             if 'cmd' not in topic and 'collision' not in topic:
+                if topic not in self._ros_msg_times:
+                    if print:
+                        logger.debug('Topic {0} has never been received'.format(topic))
+                    return False
                 elapsed = (rospy.Time.now() - self._ros_msg_times[topic]).to_sec()
                 if elapsed > self._dt:
                     if print:

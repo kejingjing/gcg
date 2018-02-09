@@ -77,9 +77,13 @@ class AsyncRWrccarGCG(AsyncGCG):
             if len(colls) == 0:
                 logger.warn('{0}: empty bag'.format(os.path.basename(fname)))
                 continue
-            if colls.max() > 0 and colls[1] != 1:
-                logger.warn('{0}: has collision, but does not end in collision'.format(os.path.basename(fname)))
-                continue
+            if colls.max() > 0:
+                if colls.sum() > 1:
+                    logger.warn('{0}: has multiple collisions'.format(os.path.basename(fname)))
+                    continue
+                if colls[-1] != 1:
+                    logger.warn('{0}: has collision, but does not end in collision'.format(os.path.basename(fname)))
+                    continue
 
             ### make sure it moved at least a little bit
             encoders = np.array([msg.data for msg in d_bag['encoder/both']])
@@ -110,8 +114,8 @@ class AsyncRWrccarGCG(AsyncGCG):
                 logger.warn('{0}: did not end in done, manually resetting'.format(os.path.basename(fname)))
                 self._sampler.reset(offline=True)
 
-            if not self._env._is_collision:
-                logger.warn('{0}: not ending in collision'.format(os.path.basename(fname)))
+            # if not self._env._is_collision:
+            #     logger.warn('{0}: not ending in collision'.format(os.path.basename(fname)))
 
             timesteps_kept += len(d_bag['mode']) - 1
 
@@ -202,9 +206,9 @@ class AsyncRWrccarGCG(AsyncGCG):
         return inference_step
 
 
-def run_async_rw_rccar_gcg_train(params):
-    run_async_gcg_train(params, AsyncClass=AsyncRWrccarGCG)
+def run_async_rw_rccar_gcg_train(params, is_continue):
+    run_async_gcg_train(params, is_continue, AsyncClass=AsyncRWrccarGCG)
 
 
 def run_async_rw_rccar_gcg_inference(params):
-    run_async_gcg_inference(params, AsyncClass=AsyncRWrccarGCG)
+    run_async_gcg_inference(params, is_continue, AsyncClass=AsyncRWrccarGCG)

@@ -1,4 +1,4 @@
-import os, glob
+import os, sys, glob
 import numpy as np
 
 from gcg.envs.env_utils import create_env
@@ -31,7 +31,7 @@ class GCG(object):
             save_rollouts=kwargs['save_rollouts'],
             save_rollouts_observations=kwargs['save_rollouts_observations'],
             save_env_infos=kwargs['save_env_infos'],
-            env_str=kwargs['env_str'],
+            env_dict=kwargs['env_dict'],
             replay_pool_params=kwargs['replay_pool_params']
         )
 
@@ -295,11 +295,14 @@ class GCG(object):
 
         self._save(save_itr, self._sampler.get_recent_paths(), eval_rollouts)
 
-def run_gcg(params):
+def run_gcg(params, is_continue):
     curr_dir = os.path.dirname(__file__)
     data_dir = os.path.join(curr_dir[:curr_dir.find('src/gcg')], 'data')
     assert (os.path.exists(data_dir))
     save_dir = os.path.join(data_dir, params['exp_name'])
+    if os.path.exists(save_dir) and not is_continue:
+        print('Save directory {0} exists. You need to explicitly say to continue if you want to start training from where you left off'.format(save_dir))
+        sys.exit(0)
     os.makedirs(save_dir, exist_ok=True)
     load_dir = os.path.join(data_dir, params.get('load_policy', params['exp_name']))
     assert (os.path.exists(load_dir))
@@ -316,11 +319,11 @@ def run_gcg(params):
 
     os.environ["CUDA_VISIBLE_DEVICES"] = str(params['policy']['gpu_device'])  # TODO: hack so don't double GPU
 
-    env_str = params['alg'].pop('env')
-    env = create_env(env_str, seed=params['seed'])
+    env_dict = params['alg'].pop('env')
+    env = create_env(env_dict, seed=params['seed'])
 
-    env_eval_str = params['alg'].pop('env_eval', env_str)
-    env_eval = create_env(env_eval_str, seed=params['seed'])
+    env_eval_dict = params['alg'].pop('env_eval', env_dict)
+    env_eval = create_env(env_eval_dict, seed=params['seed'])
 
     env.reset()
     env_eval.reset()
@@ -355,7 +358,7 @@ def run_gcg(params):
         env_eval=env_eval,
         policy=policy,
         max_path_length=max_path_length,
-        env_str=env_str,
+        env_dict=env_dict,
         **params['alg']
     )
     algo.train()
