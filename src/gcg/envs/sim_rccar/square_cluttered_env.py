@@ -8,7 +8,7 @@ from gcg.envs.sim_rccar.square_env import SquareEnv
 class SquareClutteredEnv(SquareEnv):
     @property
     def _model_path(self):
-        return os.path.join(self._base_dir, 'models/square_cluttered.egg')
+        return os.path.join(self._base_dir, 'square_cluttered.egg')
 
     def _setup_collision_object(self, path, pos=(0.0, 0.0, 0.0), hpr=(0.0, 0.0, 0.0), scale=1):
         visNP = loader.loadModel(path)

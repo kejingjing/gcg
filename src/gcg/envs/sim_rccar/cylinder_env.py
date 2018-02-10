@@ -7,7 +7,7 @@ from gcg.envs.sim_rccar.car_env import CarEnv
 class CylinderEnv(CarEnv):
     @property
     def _model_path(self):
-        return os.path.join(self._base_dir, 'models/cylinder.egg')
+        return os.path.join(self._base_dir, 'cylinder.egg')
 
     ### default
 

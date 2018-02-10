@@ -343,7 +343,7 @@ class CarEnv(DirectObject):
     def _default_hpr(self):
         return (0.0, 0.0, 0.0)
 
-    def _default_restart_pos():
+    def _default_restart_pos(self):
         return [self._default_pos() + self._default_hpr()]
 
     def _get_speed(self):
