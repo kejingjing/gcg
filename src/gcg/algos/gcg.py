@@ -145,7 +145,7 @@ class GCG(object):
 
     def _get_inference_itr(self):
         inference_itr = 0
-        while len(glob.glob(self._train_rollouts_file_name(inference_itr) + '*')) > 0:
+        while len(glob.glob(os.path.splitext(self._train_rollouts_file_name(inference_itr))[0] + '*')) > 0:
             inference_itr += 1
 
         return inference_itr

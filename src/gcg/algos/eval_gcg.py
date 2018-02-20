@@ -1,4 +1,4 @@
-import os, sys
+import os, sys, glob
 
 import numpy as np
 
@@ -46,7 +46,7 @@ class EvalGCG(GCG):
     ############
 
     def _save_eval_rollouts(self, rollouts):
-        fname = self._eval_rollouts_file_name(self._eval_save_dir)
+        fname = self._eval_rollouts_file_name(self._eval_itr)
         mypickle.dump({'rollouts': rollouts}, fname)
 
     ###############
@@ -65,11 +65,28 @@ class EvalGCG(GCG):
     ### Eval ###
     ############
 
+    def _eval_reset(self, **kwargs):
+        self._sampler.reset(**kwargs)
+
+    def _eval_step(self):
+        self._sampler.step(step=0,
+                           take_random_actions=False,
+                           explore=False)
+
+    def _eval_save(self, rollouts, new_rollouts):
+        assert (len(new_rollouts) > 0)
+
+        logger.info('Saving rollouts')
+        rollouts += new_rollouts
+        self._save_eval_rollouts(rollouts)
+
+        return rollouts
+    
     def eval(self):
         ### Load policy
         policy_fname = self._load_inference_policy_file_name(self._eval_itr)
-        if not os.path.exists(policy_fname):
-            logger.error('Policy for itr {0} does not exist'.format(self._eval_itr))
+        if len(glob.glob(os.path.splitext(policy_fname)[0] + '*')) == 0:
+            logger.error('Policy for {0} does not exist'.format(policy_fname))
             sys.exit(0)
         logger.info('Restoring policy for itr {0}'.format(self._eval_itr))
         self._policy.restore(policy_fname, train=False)
@@ -79,39 +96,24 @@ class EvalGCG(GCG):
         rollouts = self._load_eval_rollouts(self._eval_itr)
         logger.info('Loaded {0} rollouts'.format(len(rollouts)))
 
+        self._eval_reset()
+        
         logger.info('')
         logger.info('Rollout {0}'.format(len(rollouts)))
         while True:
-            try:
-                self._sampler.step(step=0,
-                                   take_random_actions=False,
-                                   explore=False)
-            except Exception as e:
-                logger.warn('Sampler exception {0}'.format(str(e)))
-                self._sampler.trash_current_rollouts()
-
-                logger.info('Press enter to continue')
-                input()
-                logger.info('')
-                logger.info('Rollout {0}'.format(len(rollouts)))
-
+            self._eval_step()
+            
             new_rollouts = self._sampler.get_recent_paths()
             if len(new_rollouts) > 0:
-                logger.info('')
-                logger.info('Keep rollout?')
-                response = input()
-                if response != 'y':
-                    logger.info('NOT saving rollouts')
-                    continue
-
-                logger.info('Saving rollouts')
-                rollouts += new_rollouts
-                self._save_eval_rollouts(rollouts)
+                rollouts = self._eval_save(rollouts, new_rollouts)
 
                 logger.info('')
                 logger.info('Rollout {0}'.format(len(rollouts)))
 
-def eval_gcg(params, itr):
+def eval_gcg(params, itr, EvalClass=None):
+    if EvalClass is None:
+        EvalClass = EvalGCG
+    
     curr_dir = os.path.dirname(__file__)
     data_dir = os.path.join(curr_dir[:curr_dir.find('src/gcg')], 'data')
     assert (os.path.exists(data_dir))
@@ -133,10 +135,9 @@ def eval_gcg(params, itr):
 
     os.environ["CUDA_VISIBLE_DEVICES"] = str(params['policy']['gpu_device'])  # TODO: hack so don't double GPU
 
+    params['alg'].pop('env')
     env_eval_dict = params['alg'].pop('env_eval')
     env_eval = create_env(env_eval_dict, seed=params['seed'])
-
-    env_eval.reset()
 
     #####################
     ### Create policy ###
@@ -161,7 +162,9 @@ def eval_gcg(params, itr):
         max_path_length = params['alg'].pop('max_path_length')
     else:
         max_path_length = env_eval.horizon
-    algo = EvalGCG(
+    algo = EvalClass(
+        eval_itr=itr,
+        eval_save_dir=eval_save_dir,
         save_dir=save_dir,
         env=None,
         env_eval=env_eval,
