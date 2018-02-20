@@ -325,9 +325,10 @@ class RWrccarEnv:
             else:
                 logger.debug('Resetting (no collision)')
 
-            backup_steer = np.random.uniform(*self._backup_steer_range)
-            self._set_steer(backup_steer)
-            self._set_motor(self._backup_motor, self._backup_duration)
+            if self._backup_duration > 0:
+                backup_steer = np.random.uniform(*self._backup_steer_range)
+                self._set_steer(backup_steer)
+                self._set_motor(self._backup_motor, self._backup_duration)
             self._set_steer(0.)
             self._set_vel(0.)
 

@@ -206,7 +206,6 @@ class AsyncRWrccarGCG(AsyncGCG):
 
         return inference_step
 
-
 def run_async_rw_rccar_gcg_train(params, is_continue):
     run_async_gcg_train(params, is_continue, AsyncClass=AsyncRWrccarGCG)
 
