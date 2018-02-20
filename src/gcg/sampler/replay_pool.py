@@ -47,7 +47,7 @@ class ReplayPool(object):
         self._sampling_indices = np.zeros((self._size,), dtype=bool)
         self._index = 0
         self._curr_size = 0
-        self._done_indices = []
+        self._done_indices = set()
 
         ### keep track of statistics
         self._stats = defaultdict(int)
@@ -118,7 +118,7 @@ class ReplayPool(object):
         if self._last_done_index == self._index:
             return
 
-        self._done_indices.append(self._index - 1)
+        self._done_indices.add(self._index - 1)
         indices = self._get_indices(self._last_done_index, self._index)
         rewards = self._rewards[indices]
 
@@ -183,7 +183,10 @@ class ReplayPool(object):
 
         r_len = len(rollout['dones'])
         for i in range(r_len):
-            self.store_observation(start_step + i, (rollout['observations_im'][i], rollout['observations_vec'][i]), rollout['goals'][i])
+            try:
+                self.store_observation(start_step + i, (rollout['observations_im'][i], rollout['observations_vec'][i]), rollout['goals'][i])
+            except:
+                self.store_observation(start_step + i, (rollout['observations_im'][i], rollout['observations_vec'][i]), np.zeros((self._goal_dim,)))
             self.store_effect(rollout['actions'][i],
                               rollout['rewards'][i],
                               rollout['dones'][i],
@@ -229,10 +232,10 @@ class ReplayPool(object):
 
     def _sample_start_indices(self, batch_size, only_completed_episodes):
         start_indices = []
-        false_indices = self._get_indices(self._index - self._obs_history_len, self._index + self._N)
-        false_indices += self._done_indices
+        false_indices = set(self._get_indices(self._index - self._obs_history_len, self._index + self._N))
+        false_indices |= self._done_indices
         if only_completed_episodes and self._last_done_index != self._index:
-            false_indices += self._get_indices(self._last_done_index, self._index)
+            false_indices |= set(self._get_indices(self._last_done_index, self._index))
 
         if self._sampling_method == 'uniform':
             while len(start_indices) < batch_size:
@@ -257,7 +260,6 @@ class ReplayPool(object):
                     start_indices.append(start_index)
         else:
             raise NotImplementedError
-
         return start_indices
 
     def sample(self, batch_size, include_env_infos=False, only_completed_episodes=False):
