@@ -2,8 +2,8 @@ import os, sys, glob
 import numpy as np
 
 from gcg.envs.env_utils import create_env
-from gcg.policies.gcg_policy import GCGPolicy
 from gcg.sampler.sampler import Sampler
+from gcg.policies.gcg_policy import GCGPolicy
 from gcg.data.timer import timeit
 from gcg.data.logger import logger
 from gcg.data import mypickle
@@ -145,7 +145,7 @@ class GCG(object):
 
     def _get_inference_itr(self):
         inference_itr = 0
-        while len(glob.glob(self._train_rollouts_file_name(inference_itr) + '*')) > 0:
+        while len(glob.glob(os.path.splitext(self._train_rollouts_file_name(inference_itr))[0] + '*')) > 0:
             inference_itr += 1
 
         return inference_itr
@@ -175,11 +175,14 @@ class GCG(object):
         itr = 0
         while len(glob.glob(os.path.splitext(self._load_train_policy_file_name(itr))[0] + '*')) > 0:
             itr += 1
+        itr -= 1
 
-        if itr > 0:
-            logger.info('Loading train policy from {0} iteration {1}...'.format(self._load_dir, itr - 1))
-            self._policy.restore(self._load_train_policy_file_name(itr - 1), train=True)
+        if itr >= 0:
+            logger.info('Loading train policy from {0} iteration {1}...'.format(self._load_dir, itr))
+            self._policy.restore(self._load_train_policy_file_name(itr), train=True)
             logger.info('Loaded train policy!')
+
+        return itr
 
     def _restore_inference_policy(self):
         """
@@ -188,11 +191,14 @@ class GCG(object):
         itr = 0
         while len(glob.glob(os.path.splitext(self._load_inference_policy_file_name(itr))[0] + '*')) > 0:
             itr += 1
+        itr -= 1
 
         if itr > 0:
-            logger.info('Loading inference policy from iteration {0}...'.format(itr - 1))
-            self._policy.restore(self._load_inference_policy_file_name(itr - 1), train=False)
+            logger.info('Loading inference policy from iteration {0}...'.format(itr))
+            self._policy.restore(self._load_inference_policy_file_name(itr), train=False)
             logger.info('Loaded inference policy!')
+
+        return itr
 
     def _restore(self):
         self._restore_train_rollouts()
@@ -313,7 +319,7 @@ def run_gcg(params, is_continue):
     # TODO: set seed
 
     # copy yaml for posterity
-    yaml_path = os.path.join(save_dir, 'params.yaml'.format(params['exp_name']))
+    yaml_path = os.path.join(save_dir, 'params.yaml')
     with open(yaml_path, 'w') as f:
         f.write(params['txt'])
 

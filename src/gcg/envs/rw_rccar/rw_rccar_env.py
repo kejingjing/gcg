@@ -142,6 +142,7 @@ class RWrccarEnv:
             ('encoder/left', std_msgs.msg.Float32),
             ('encoder/right', std_msgs.msg.Float32),
             ('encoder/both', std_msgs.msg.Float32),
+            ('encoder/error', std_msgs.msg.Int32),
             ('orientation/quat', geometry_msgs.msg.Quaternion),
             ('orientation/rpy', geometry_msgs.msg.Vector3),
             ('imu', geometry_msgs.msg.Accel),
@@ -324,9 +325,10 @@ class RWrccarEnv:
             else:
                 logger.debug('Resetting (no collision)')
 
-            backup_steer = np.random.uniform(*self._backup_steer_range)
-            self._set_steer(backup_steer)
-            self._set_motor(self._backup_motor, self._backup_duration)
+            if self._backup_duration > 0:
+                backup_steer = np.random.uniform(*self._backup_steer_range)
+                self._set_steer(backup_steer)
+                self._set_motor(self._backup_motor, self._backup_duration)
             self._set_steer(0.)
             self._set_vel(0.)
 
@@ -396,6 +398,11 @@ class RWrccarEnv:
             if print:
                 logger.warn('Car has flipped, please unflip it to continue')
             self._is_collision = False # otherwise will stay flipped forever
+            return False
+
+        if self._ros_msgs['encoder/error'].data:
+            if print:
+                logger.warn('Encoder error')
             return False
         
         return True

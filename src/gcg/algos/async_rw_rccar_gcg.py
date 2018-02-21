@@ -94,22 +94,23 @@ class AsyncRWrccarGCG(AsyncGCG):
             ### update env and step
             def update_env(t):
                 for key in d_bag.keys():
-                    try:
-                        self._env.ros_msg_update(d_bag[key][t], [key])
-                    except:
-                        import IPython; IPython.embed()
+                    self._env.ros_msg_update(d_bag[key][t], [key])
+                    
+            try:
+                update_env(0)
+                if len(self._sampler) == 0:
+                    logger.warn('Resetting!')
+                    self._sampler.reset(offline=True)
 
-            update_env(0)
-            if len(self._sampler) == 0:
-                logger.warn('Resetting!')
-                self._sampler.reset(offline=True)
-
-            bag_length = len(d_bag['mode'])
-            for t in range(1, bag_length):
-                update_env(t)
-                action = np.array([d_bag['cmd/steer'][t-1].data, d_bag['cmd/vel'][t-1].data])
-                self._sampler.step(len(self._sampler), actions=[action], offline=True)
-
+                bag_length = len(d_bag['mode'])
+                for t in range(1, bag_length):
+                    update_env(t)
+                    action = np.array([d_bag['cmd/steer'][t-1].data, d_bag['cmd/vel'][t-1].data])
+                    self._sampler.step(len(self._sampler), actions=[action], offline=True)
+            except:
+                logger.warn('{0}: update env exception'.format(os.path.basename(fname)))
+                continue
+                    
             if not self._sampler.is_done_nexts:
                 logger.warn('{0}: did not end in done, manually resetting'.format(os.path.basename(fname)))
                 self._sampler.reset(offline=True)
@@ -204,7 +205,6 @@ class AsyncRWrccarGCG(AsyncGCG):
             logger.warn('Continuing...')
 
         return inference_step
-
 
 def run_async_rw_rccar_gcg_train(params, is_continue):
     run_async_gcg_train(params, is_continue, AsyncClass=AsyncRWrccarGCG)

@@ -20,6 +20,7 @@ class AsyncGCG(GCG):
         train_args = kwargs['async']['train']
         self._train_save_every_n_steps = train_args['save_every_n_steps']
         self._train_reset_every_n_steps = train_args['reset_every_n_steps']
+        self._train_total_steps = train_args.get('total_steps', sys.maxsize)
 
         infer_args = kwargs['async']['inference']
         self._ssh = infer_args['ssh']
@@ -137,7 +138,7 @@ class AsyncGCG(GCG):
         timeit.start('total')
         while True:
             inference_step = len(self._sampler) - init_inference_step
-            if inference_step > self._total_steps:
+            if inference_step > self._total_steps or train_step > self._train_total_steps:
                 break
 
             if inference_step >= self._learn_after_n_steps:
