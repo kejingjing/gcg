@@ -3,6 +3,7 @@ import os, itertools
 import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib import cm
+import matplotlib.patches as mpatches
 
 from gcg.policies.gcg_policy import GCGPolicy
 from gcg.sampler.replay_pool import ReplayPool
@@ -43,7 +44,7 @@ def plot_test():
                  xlim=None,
                  ylim=None)
 
-def plot_rw_rccar_var001_var016(ckpt_itr=None):
+def plot_rw_rccar_var001_var016_OLD(ckpt_itr=None):
     label_params =[['exp', ('exp_name',)]]
 
     experiment_groups = [
@@ -216,11 +217,65 @@ def plot_rw_rccar_var001_var016(ckpt_itr=None):
 
         tf_sess.close()
 
+def plot_rw_rccar_var001_var016():
+    label_params = [
+        # ['exp', ('exp_name',)],
+        ['policy', ('policy', 'GCGPolicy', 'outputs', 0, 'name')],
+        ['H', ('policy', 'H')],
+        ['target', ('policy', 'use_target')],
+        ['obs_shape', ('alg', 'env', 'params', 'obs_shape')]
+    ]
+
+    experiment_groups = [
+        ExperimentGroup(os.path.join(DATA_DIR, 'rw_rccar/var{0:03d}'.format(num)),
+                        label_params=label_params,
+                        plot={
+                        })
+    for num in [1, 5, 9, 12, 13]]
+
+    mec = MultiExperimentComparison(experiment_groups)
+
+    lengths_list = []
+    for exp in mec.list:
+        eval_folder = os.path.join(exp.folder, 'eval_itr_0039')
+        eval_pkl_fname = os.path.join(eval_folder, 'itr_0039_eval_rollouts.pkl')
+        rollouts = mypickle.load(eval_pkl_fname)['rollouts']
+
+        assert (len(rollouts) == 24)
+
+        lengths = [len(r['dones']) for r in rollouts]
+        lengths_list.append(lengths)
+
+    f, ax = plt.subplots(1, 1)
+    xs = np.vstack((np.r_[0:8.] + 0.,
+                    np.r_[0:8.] + 0.1,
+                    np.r_[0:8.] + 0.2,)).T.ravel()
+    legend_patches = []
+    for i, (exp, lengths) in enumerate(zip(mec.list, lengths_list)):
+        lengths = np.reshape(lengths, (8, 3))
+        width = 0.6 / float(len(lengths_list))
+        color = cm.viridis(i / float(len(lengths_list)))
+        label = 'median: {0}, {1}'.format(np.median(lengths), exp.plot['label'])
+
+        bp = ax.boxplot(lengths.T, positions=np.arange(len(lengths)) + 1.2 * i * width, widths=width, patch_artist=True)
+        for patch in bp['boxes']:
+            patch.set_facecolor(color)
+        legend_patches.append(mpatches.Patch(color=color, label=label))
+        # ax.plot(xs, lengths, label=exp.plot['label'], linestyle='None', marker='o')
+    ax.legend(handles=legend_patches)
+    ax.xaxis.set_ticks(np.arange(8))
+    ax.xaxis.set_ticklabels(np.arange(8))
+    ax.set_xlim((-0.5, 8.5))
+    ax.set_xlabel('Start Position Number')
+    ax.set_ylabel('Timesteps survived')
+    plt.show()
+
+    import IPython; IPython.embed()
 
 if __name__ == '__main__':
     logger.setup(display_name='tmp',
                  log_path='/tmp/log.txt',
                  lvl='debug')
 
-    plot_test()
-    # plot_rw_rccar_var001_var016()
+    # plot_test()
+    plot_rw_rccar_var001_var016()
