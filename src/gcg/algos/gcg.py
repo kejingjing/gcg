@@ -76,8 +76,12 @@ class GCG(object):
     ### Files ###
     #############
 
+    @property
+    def _train_rollouts_file_name_suffix(self):
+        return 'train_rollouts.pkl'
+
     def _train_rollouts_file_name(self, itr):
-        return os.path.join(self._save_dir, 'itr_{0:04d}_train_rollouts.pkl'.format(itr))
+        return os.path.join(self._save_dir, 'itr_{0:04d}_{1}'.format(itr, self._train_rollouts_file_name_suffix))
 
     def _eval_rollouts_file_name(self, itr):
         return os.path.join(self._save_dir, 'itr_{0:04d}_eval_rollouts.pkl'.format(itr))
@@ -144,9 +148,8 @@ class GCG(object):
         return train_itr
 
     def _get_inference_itr(self):
-        inference_itr = 0
-        while len(glob.glob(os.path.splitext(self._train_rollouts_file_name(inference_itr))[0] + '*')) > 0:
-            inference_itr += 1
+        itrs = [int(f.split('_')[1]) for f in os.listdir(self._save_dir) if self._train_rollouts_file_name_suffix in f]
+        inference_itr = max([-1] + itrs) + 1
 
         return inference_itr
 

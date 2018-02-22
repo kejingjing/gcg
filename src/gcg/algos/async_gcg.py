@@ -176,18 +176,22 @@ class AsyncGCG(GCG):
 
             ### save model
             if train_step > 0 and train_step % self._train_save_every_n_steps == 0:
+                timeit.start('save')
                 logger.debug('Saving files for itr {0}'.format(train_itr))
                 self._save_train(train_itr)
                 train_itr += 1
+                timeit.stop('save')
+
+                ### load data
+                timeit.start('load')
+                inference_itr = self._train_load_data(inference_itr)
+                timeit.stop('load')
 
             ### reset model
             if train_step > 0 and self._train_reset_every_n_steps is not None and \
                                     train_step % self._train_reset_every_n_steps == 0:
                 logger.debug('Resetting model')
                 self._policy.reset_weights()
-
-            ### load data
-            inference_itr = self._train_load_data(inference_itr)
 
     def _inference_reset_sampler(self):
         self._sampler.reset()
@@ -261,13 +265,16 @@ class AsyncGCG(GCG):
                 self._inference_reset_sampler()
 
                 ### save rollouts
+                timeit.start('save')
                 logger.debug('Saving files for itr {0}'.format(inference_itr))
                 self._save_inference(inference_itr, train_rollouts, eval_rollouts)
                 inference_itr += 1
                 train_rollouts = []
                 eval_rollouts = []
+                timeit.stop('save')
 
                 ### load model
+                timeit.start('load')
                 with self._rsync_lock:  # to ensure the ckpt has been fully transferred over
                     new_train_itr = self._get_train_itr()
                     if train_itr < new_train_itr:
@@ -279,6 +286,7 @@ class AsyncGCG(GCG):
                             logger.debug('Failed to load model for itr {0}'.format(new_train_itr - 1))
                             self._policy.restore(self._inference_policy_file_name(train_itr - 1), train=False)
                             logger.debug('As backup, restored itr {0}'.format(train_itr - 1))
+                timeit.stop('load')
 
         self._save_inference(inference_itr, self._sampler.get_recent_paths(), eval_rollouts)
 
