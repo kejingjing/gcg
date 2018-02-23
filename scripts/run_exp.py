@@ -10,7 +10,8 @@ parser.add_argument('--continue', action='store_true')
 args = parser.parse_args()
 
 for exp in args.exps:
-    yaml_path = os.path.abspath('../yamls/{0}.yaml'.format(exp))
+    yaml_path = os.path.abspath('yamls/{0}.yaml'.format(exp))
+    print(yaml_path)
     assert(os.path.exists(yaml_path))
     with open(yaml_path, 'r') as f:
         params = yaml.load(f)

@@ -215,8 +215,10 @@ class CrazyflieEnv:
         self.observation_vec_spec['v_batt'] = Box(low=0, high=6)
         self.observation_vec_spec['alt'] = Box(low=0, high=1.2) #meters
 
+
+
     def _get_observation(self):
-        msg = self._ros_msgs['camera/image_raw/compressed']
+        msg = self._ros_msgs['cf/0/image']
 
         recon_pil_jpg = BytesIO(msg.data)
         recon_pil_arr = Image.open(recon_pil_jpg)
@@ -233,13 +235,14 @@ class CrazyflieEnv:
                                                Image.ANTIALIAS)  # b/c (width, height)
             im = np.array(rgb_resized)
 
-        coll = self._is_collision
-        heading = self._ros_msgs['orientation/rpy'].z
-        speed = self._get_speed()
-        steer = self._ros_msgs['steer'].data
-        motor = self._ros_msgs['motor'].data
+        coll = self.is_collision
+        accel_x = self._ros_msgs['accel_x'].data
+        accel_y = self._ros_msgs['accel_y'].data
+        accel_z = self._ros_msgs['accel_z'].data
+        v_batt = self._ros_msgs['v_batt'].data
+        alt = self._ros_msgs['alt'].data
 
-        vec = np.array([coll, heading, speed, steer, motor])
+        vec = np.array([coll, alt, v_batt, accel_x, accel_y, accel_z])
 
         return im, vec
 
@@ -247,17 +250,14 @@ class CrazyflieEnv:
         # TODO: make sure if there is a goal, to add it as a ROS msg
         return np.array([])
 
-    def _get_speed(self):
-        return self._ros_msgs['encoder/both'].data
+    '''def _get_speed(self):
+        return #self._ros_msgs['encoder/both'].data'''
 
     def _get_reward(self):
         if self._is_collision:
             reward = self._collision_reward
         else:
-            if self._collision_reward_only:
-                reward = 0
-            else:
-                reward = self._get_speed()
+            reward = 0
         return reward
 
     def _get_done(self):
