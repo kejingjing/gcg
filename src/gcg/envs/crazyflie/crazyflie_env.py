@@ -10,6 +10,8 @@ from gcg.envs.spaces.box import Box
 from gcg.envs.spaces.discrete import Discrete
 from gcg.data.logger import logger
 
+from crazyflie.msg import CFMotion
+
 try:
     import rospy
     import rosbag
@@ -263,7 +265,7 @@ class CrazyflieEnv:
     def _get_done(self):
         return self._is_collision
 
-    def _set_steer(self, steer):
+'''    def _set_steer(self, steer):
         self._ros_steer_pub.publish(std_msgs.msg.Float32(steer))
 
     def _set_vel(self, vel):
@@ -280,7 +282,17 @@ class CrazyflieEnv:
             rospy.sleep(0.01)
         self._ros_motor_pub.publish(std_msgs.msg.Float32(0.))
         self._ros_pid_enable_pub.publish(std_msgs.msg.Empty())
-        rospy.sleep(0.25)
+        rospy.sleep(0.25)'''
+
+    def set_motion(self, x, y, yaw, dz):
+    	motion = crazyflie.msg.CFMotion()
+    	motion.x = x
+    	motion.y = y
+    	motion.yaw = yaw
+    	motion.dz = dz
+    	motion.is_flow_motion = True
+    	self._ros_motion_pub.publish(motion)
+
 
     def step(self, action, offline=False):
         if not offline:
