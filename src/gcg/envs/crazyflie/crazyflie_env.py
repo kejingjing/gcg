@@ -93,8 +93,7 @@ class CrazyflieEnv:
         params.setdefault('ros_namespace', '/crazyflie/')
         params.setdefault('obs_shape', (96, 72, 1))
         # params.setdefault('steer_limits', [-0.9, 0.9])
-        params.setdefault('dz_limits', [0,0]) #default change in alt
-        params.setdefault('yaw_limits', [0,0]) #default yaw rate range
+        params.setdefault('altitude_target', 0.4) #default altitude of flight
         params.setdefault('velocity_limits', [-0.3, 0.3])
         # params.setdefault('backup_motor', -0.22)
         # params.setdefault('backup_duration', 1.6)
@@ -105,13 +104,9 @@ class CrazyflieEnv:
         self._obs_shape = params['obs_shape']
         # self._steer_limits = params['steer_limits']
         # self._speed_limits = params['speed_limits']
-        self._dz_limits = params['dz_limits']
-        self._yaw_limits = params['yaw_limits']
+        self._altitude_target = params['altitude_target']
         self._velocity_limits = params['velocity_limits']
-
-        #new
-        self._fixed_alt = self._dz_limits[0] == self._dz_limits[1]
-
+        self._fixed_speed = (self._speed_limits[0] == self._speed_limits[1] and self._use_vel)
         self._collision_reward = params['collision_reward']
         self._collision_reward_only = params['collision_reward_only']
 
@@ -173,12 +168,10 @@ class CrazyflieEnv:
         for topic, type in self._ros_topics_and_types.items():
             rospy.Subscriber(self._ros_namespace + topic, type, self.ros_msg_update, (topic,))
         
-        self._ros_motion_pub = rospy.Publisher("/cf/0/motion", crazyflie.msg.CFMotion)
-
-        # self._ros_vx_pub = rospy.Publisher(self._ros_namespace + 'cmd/vx', std_msgs.msg.Float32, queue_size=10)
-        # self._ros_vy_pub = rospy.Publisher(self._ros_namespace + 'cmd/vy', std_msgs.msg.Float32, queue_size=10)
-        # self._ros_yaw_pub = rospy.Publisher(self._ros_namespace + 'cmd/yaw', std_msgs.msg.Float32, queue_size=10)
-        # self._ros_alt_pub = rospy.Publisher(self._ros_namespace + 'cmd/alt', std_msgs.msg.Float32, queue_size=10)
+        self._ros_vx_pub = rospy.Publisher(self._ros_namespace + 'cmd/vx', std_msgs.msg.Float32, queue_size=10)
+        self._ros_vy_pub = rospy.Publisher(self._ros_namespace + 'cmd/vy', std_msgs.msg.Float32, queue_size=10)
+        self._ros_yaw_pub = rospy.Publisher(self._ros_namespace + 'cmd/yaw', std_msgs.msg.Float32, queue_size=10)
+        self._ros_alt_pub = rospy.Publisher(self._ros_namespace + 'cmd/alt', std_msgs.msg.Float32, queue_size=10)
         # self._ros_motor_pub = rospy.Publisher(self._ros_namespace + 'cmd/motor', std_msgs.msg.Float32, queue_size=10)
         self._ros_pid_enable_pub = rospy.Publisher(self._ros_namespace + 'pid/enable', std_msgs.msg.Empty,
                                                    queue_size=10)
@@ -197,16 +190,15 @@ class CrazyflieEnv:
         self.action_spec['vx'] = Box(low=-1., high=1.)
         self.action_spec['vy'] = Box(low=-1, high=1)
         self.action_spec['yaw'] = Box(low=-1, high=1)
-        self.action_spec['dz'] = Box(low=-0.8, high=0.8) #meters
-        self.action_space = Box(low=np.array([self.action_spec['vx'].low[0], self.action_spec['vy'].low[0], self.action_spec['yaw'].low[0], self.action_spec['dz'].low[0]]),
-                                high=np.array([self.action_spec['vx'].high[0], self.action_spec['vy'].high[0], self.action_spec['yaw'].high[0], self.action_spec['dz'].high[0]]))
+        self.action_spec['altitude'] = Box(low=0.0, high=1.2) #meters
+        self.action_space = Box(low=np.array([self.action_spec['vx'].low[0], self.action_spec['vx'].low[0], self.action_spec['yaw'].low[0], self.action_spec['altitude'].low[0]]),
+                                high=np.array([self.action_spec['vx'].high[0], self.action_spec['vx'].high[0], self.action_spec['yaw'].high[0], self.action_spec['altitude'].high[0]]))
 
         self.action_selection_spec['vx'] = Box(low=self._velocity_limits[0], high=self._velocity_limits[1])
         self.action_selection_spec['vy'] = Box(low=self._velocity_limits[0], high=self._velocity_limits[1])
-        self.action_selection_spec['yaw'] = Box(low=self._yaw_limits[0], high=self._yaw_limits[1])
-        self.action_selection_spec['dz'] = Box(low=self._dz_limits[0], high=self._dz_limits[1]) #fixed
-        self.action_selection_space = Box(low=np.array([self.action_selection_spec['vx'].low[0], self.action_selection_spec['vy'].low[0], self.action_selection_spec['yaw'].low[0], self.action_selection_spec['dz'].low[0]]),
-                                high=np.array([self.action_selection_spec['vx'].high[0], self.action_selection_spec['vy'].high[0], self.action_selection_spec['yaw'].high[0], self.action_selection_spec['dz'].high[0]]))
+        self.action_selection_spec['altitude_target'] = Box(low=self._altitude_target, high=self._altitude_target)
+        self.action_selection_space = Box(low=np.array([self.action_selection_spec['vx'].low[0], self.action_selection_spec['vx'].low[0], self.action_selection_spec['yaw'].low[0], self.action_selection_spec['altitude'].low[0]]),
+                                high=np.array([self.action_selection_spec['vx'].high[0], self.action_selection_spec['vx'].high[0], self.action_selection_spec['yaw'].high[0], self.action_selection_spec['altitude'].high[0]]))
 
 
         #Box(low=np.array([self.action_selection_spec['steer'].low[0],
@@ -301,6 +293,12 @@ class CrazyflieEnv:
     	motion.is_flow_motion = True
     	self._ros_motion_pub.publish(motion)
 
+    def set_command(self, cmd):
+    	#0 is ESTOP, 1 IS LAND, 2 IS TAKEOFF
+    	command = crazyflie.msg.CFCommand()
+    	command.cmd = cmd
+    	self._ros_command_pub.publish(command)
+
 
     def step(self, action, offline=False):
         if not offline:
@@ -313,9 +311,8 @@ class CrazyflieEnv:
                                                                                           self.action_space.high))
             action = np.clip(action, self.action_space.low, self.action_space.high)
 
-        cmd_steer, cmd_vel = action
-        self._set_steer(cmd_steer)
-        self._set_vel(cmd_vel)
+        vx, vy, yaw, dz = action
+        self._set_motion(vx, vy, yaw, dz)
 
         if not offline:
             rospy.sleep(max(0., self._dt - (rospy.Time.now() - self._last_step_time).to_sec()))
@@ -362,6 +359,8 @@ class CrazyflieEnv:
             else:
                 logger.debug('Resetting (no collision)')
 
+
+
             backup_steer = np.random.uniform(*self._backup_steer_range)
             self._set_steer(backup_steer)
             self._set_motor(self._backup_motor, self._backup_duration)
@@ -407,21 +406,8 @@ class CrazyflieEnv:
                 self._ros_msgs[topic] = msg
                 self._ros_msg_times[topic] = rospy.Time.now()
         else:
-            #CF data unpacking
-            if 'data' in topic:
-                self._ros_msgs['accel_x'] = msg.accel_x
-                self._ros_msg_times['accel_x'] = rospy.Time.now()
-                self._ros_msgs['accel_y'] = msg.accel_y
-                self._ros_msg_times['accel_y'] = rospy.Time.now()
-                self._ros_msgs['accel_z'] = msg.accel_z
-                self._ros_msg_times['accel_z'] = rospy.Time.now()
-                self._ros_msgs['alt'] = msg.alt
-                self._ros_msg_times['alt'] = rospy.Time.now()
-                self._ros_msgs['v_batt'] = msg.v_batt
-                self._ros_msg_times['v_batt'] = rospy.Time.now()
-            else:
-                self._ros_msgs[topic] = msg
-                self._ros_msg_times[topic] = rospy.Time.now()
+            self._ros_msgs[topic] = msg
+            self._ros_msg_times[topic] = rospy.Time.now()
 
     def ros_is_good(self, print=True):
         # check that all not commands are coming in at a continuous rate
@@ -438,14 +424,14 @@ class CrazyflieEnv:
                     return False
 
         # check if in python mode
-        # if self._ros_msgs.get('mode') is None or self._ros_msgs['mode'].data != 2:
-        #     if print:
-        #         logger.debug('In mode {0}'.format(self._ros_msgs.get('mode')))
-        #     return False
-
-        if self._ros_msgs['cf/0/collision'].data:
+        if self._ros_msgs.get('mode') is None or self._ros_msgs['mode'].data != 2:
             if print:
-                logger.warn('Crazyflie has crashed! Flip it if it\'s not already upright')
+                logger.debug('In mode {0}'.format(self._ros_msgs.get('mode')))
+            return False
+
+        if self._ros_msgs['collision/flip'].data:
+            if print:
+                logger.warn('Car has flipped, please unflip it to continue')
             self._is_collision = False # otherwise will stay flipped forever
             return False
         
