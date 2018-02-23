@@ -11,6 +11,7 @@ from gcg.envs.spaces.discrete import Discrete
 from gcg.data.logger import logger
 
 from crazyflie.msg import CFMotion
+from crazyflie.msg import CFCommand
 
 try:
     import rospy
@@ -174,6 +175,7 @@ class CrazyflieEnv:
             rospy.Subscriber(self._ros_namespace + topic, type, self.ros_msg_update, (topic,))
         
         self._ros_motion_pub = rospy.Publisher("/cf/0/motion", crazyflie.msg.CFMotion)
+        self._ros_command_pub = rospy.Publisher("/cf/0/command", crazyflie.msg.CFCommand)
 
         # self._ros_vx_pub = rospy.Publisher(self._ros_namespace + 'cmd/vx', std_msgs.msg.Float32, queue_size=10)
         # self._ros_vy_pub = rospy.Publisher(self._ros_namespace + 'cmd/vy', std_msgs.msg.Float32, queue_size=10)
@@ -292,15 +294,20 @@ class CrazyflieEnv:
         self._ros_motor_pub.publish(std_msgs.msg.Float32(0.))
         self._ros_pid_enable_pub.publish(std_msgs.msg.Empty())
         rospy.sleep(0.25)'''
+    def _set_motion(self, x, y, yaw, dz):
+        motion = crazyflie.msg.CFMotion()
+        motion.x = x
+        motion.y = y
+        motion.yaw = yaw
+        motion.dz = dz
+        motion.is_flow_motion = True
+        self._ros_motion_pub.publish(motion)
 
-    def set_motion(self, x, y, yaw, dz):
-    	motion = crazyflie.msg.CFMotion()
-    	motion.x = x
-    	motion.y = y
-    	motion.yaw = yaw
-    	motion.dz = dz
-    	motion.is_flow_motion = True
-    	self._ros_motion_pub.publish(motion)
+    def _set_command(self, cmd):
+        #0 is ESTOP, 1 IS LAND, 2 IS TAKEOFF
+        command = crazyflie.msg.CFCommand()
+        command.cmd = cmd
+        self._ros_command_pub.publish(command)
 
 
     def step(self, action, offline=False):
@@ -314,9 +321,8 @@ class CrazyflieEnv:
                                                                                           self.action_space.high))
             action = np.clip(action, self.action_space.low, self.action_space.high)
 
-        cmd_steer, cmd_vel = action
-        self._set_steer(cmd_steer)
-        self._set_vel(cmd_vel)
+        vx, vy, yaw, dz = action
+        self._set_motion(vx, vy, yaw, dz)
 
         if not offline:
             rospy.sleep(max(0., self._dt - (rospy.Time.now() - self._last_step_time).to_sec()))
@@ -346,6 +352,8 @@ class CrazyflieEnv:
 
         assert (self.ros_is_good())
         
+        self._set_command(0)
+
         if self._ros_rolloutbag.is_open:
             if keep_rosbag:
                 self._ros_rolloutbag.close()
@@ -363,11 +371,11 @@ class CrazyflieEnv:
             else:
                 logger.debug('Resetting (no collision)')
 
-            backup_steer = np.random.uniform(*self._backup_steer_range)
-            self._set_steer(backup_steer)
-            self._set_motor(self._backup_motor, self._backup_duration)
-            self._set_steer(0.)
-            self._set_vel(0.)
+
+
+            
+        #add thing to get ENTER key to make sure crazyflie is upright
+        self._set_command(2)
 
         rospy.sleep(0.5)
 
