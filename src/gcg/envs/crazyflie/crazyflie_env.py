@@ -16,6 +16,7 @@ try:
     import std_msgs.msg
     import geometry_msgs.msg
     import sensor_msgs.msg
+    import crazyflie.msg
     ROS_IMPORTED = True
 except:
     ROS_IMPORTED = False
@@ -88,9 +89,10 @@ class CrazyflieEnv:
         params.setdefault('dt', 0.25)
         params.setdefault('horizon', int(5. * 60. / params['dt']))  # 5 minutes worth
         params.setdefault('ros_namespace', '/crazyflie/')
-        params.setdefault('obs_shape', (36, 64, 1))
+        params.setdefault('obs_shape', (96, 72, 1))
         # params.setdefault('steer_limits', [-0.9, 0.9])
-        params.setdefault('velocity_limits', [0.2, 0.2])
+        params.setdefault('altitude_target', 0.4) #default altitude of flight
+        params.setdefault('velocity_limits', [-0.3, 0.3])
         # params.setdefault('backup_motor', -0.22)
         # params.setdefault('backup_duration', 1.6)
         # params.setdefault('backup_steer_range', (-0.8, 0.8))
@@ -100,6 +102,8 @@ class CrazyflieEnv:
         self._obs_shape = params['obs_shape']
         # self._steer_limits = params['steer_limits']
         # self._speed_limits = params['speed_limits']
+        self._altitude_target = params['altitude_target']
+        self._velocity_limits = params['velocity_limits']
         self._fixed_speed = (self._speed_limits[0] == self._speed_limits[1] and self._use_vel)
         self._collision_reward = params['collision_reward']
         self._collision_reward_only = params['collision_reward_only']
@@ -130,37 +134,43 @@ class CrazyflieEnv:
             logger.warn('ROS not imported')
             return
 
-        rospy.init_node('RWrccarEnv', anonymous=True)
+        rospy.init_node('CrazyflieEnv', anonymous=True)
         rospy.sleep(1)
 
         self._ros_namespace = params['ros_namespace']
         self._ros_topics_and_types = dict([
-            ('camera/image_raw/compressed', sensor_msgs.msg.CompressedImage),
-            ('mode', std_msgs.msg.Int32),
-            ('steer', std_msgs.msg.Float32),
-            ('motor', std_msgs.msg.Float32),
-            ('encoder/left', std_msgs.msg.Float32),
-            ('encoder/right', std_msgs.msg.Float32),
-            ('encoder/both', std_msgs.msg.Float32),
-            ('orientation/quat', geometry_msgs.msg.Quaternion),
-            ('orientation/rpy', geometry_msgs.msg.Vector3),
-            ('imu', geometry_msgs.msg.Accel),
-            ('collision/all', std_msgs.msg.Int32),
-            ('collision/flip', std_msgs.msg.Int32),
-            ('collision/jolt', std_msgs.msg.Int32),
-            ('collision/stuck', std_msgs.msg.Int32),
-            ('collision/bumper', std_msgs.msg.Int32),
-            ('cmd/steer', std_msgs.msg.Float32),
-            ('cmd/motor', std_msgs.msg.Float32),
-            ('cmd/vel', std_msgs.msg.Float32)
+            ('cf/0/image', sensor_msgs.msg.CompressedImage),
+            ('cf/0/data', crazyflie.msg.CFData),
+            ('cf/0/collision', std_msgs.msg.Bool),
+
+            # ('mode', std_msgs.msg.Int32),
+            # ('steer', std_msgs.msg.Float32),
+            # ('motor', std_msgs.msg.Float32),
+            # ('encoder/left', std_msgs.msg.Float32),
+            # ('encoder/right', std_msgs.msg.Float32),
+            # ('encoder/both', std_msgs.msg.Float32),
+            # ('orientation/quat', geometry_msgs.msg.Quaternion),
+            # ('orientation/rpy', geometry_msgs.msg.Vector3),
+            # ('imu', geometry_msgs.msg.Accel),
+            # ('collision/all', std_msgs.msg.Int32),
+            # ('collision/flip', std_msgs.msg.Int32),
+            # ('collision/jolt', std_msgs.msg.Int32),
+            # ('collision/stuck', std_msgs.msg.Int32),
+            # ('collision/bumper', std_msgs.msg.Int32),
+            # ('cmd/steer', std_msgs.msg.Float32),
+            # ('cmd/motor', std_msgs.msg.Float32),
+            # ('cmd/vel', std_msgs.msg.Float32)
         ])
         self._ros_msgs = dict()
         self._ros_msg_times = dict()
         for topic, type in self._ros_topics_and_types.items():
             rospy.Subscriber(self._ros_namespace + topic, type, self.ros_msg_update, (topic,))
-        self._ros_steer_pub = rospy.Publisher(self._ros_namespace + 'cmd/steer', std_msgs.msg.Float32, queue_size=10)
-        self._ros_vel_pub = rospy.Publisher(self._ros_namespace + 'cmd/vel', std_msgs.msg.Float32, queue_size=10)
-        self._ros_motor_pub = rospy.Publisher(self._ros_namespace + 'cmd/motor', std_msgs.msg.Float32, queue_size=10)
+        
+        self._ros_vx_pub = rospy.Publisher(self._ros_namespace + 'cmd/vx', std_msgs.msg.Float32, queue_size=10)
+        self._ros_vy_pub = rospy.Publisher(self._ros_namespace + 'cmd/vy', std_msgs.msg.Float32, queue_size=10)
+        self._ros_yaw_pub = rospy.Publisher(self._ros_namespace + 'cmd/yaw', std_msgs.msg.Float32, queue_size=10)
+        self._ros_alt_pub = rospy.Publisher(self._ros_namespace + 'cmd/alt', std_msgs.msg.Float32, queue_size=10)
+        # self._ros_motor_pub = rospy.Publisher(self._ros_namespace + 'cmd/motor', std_msgs.msg.Float32, queue_size=10)
         self._ros_pid_enable_pub = rospy.Publisher(self._ros_namespace + 'pid/enable', std_msgs.msg.Empty,
                                                    queue_size=10)
         self._ros_pid_disable_pub = rospy.Publisher(self._ros_namespace + 'pid/disable', std_msgs.msg.Empty,
@@ -168,34 +178,42 @@ class CrazyflieEnv:
 
         self._ros_rolloutbag = RolloutRosbag()
         self._t = 0
-            
+        
     def _setup_spec(self):
         self.action_spec = OrderedDict()
         self.action_selection_spec = OrderedDict()
         self.observation_vec_spec = OrderedDict()
         self.goal_spec = OrderedDict()
 
-        self.action_spec['steer'] = Box(low=-1., high=1.)
-        self.action_spec['speed'] = Box(low=-0.3, high=0.3)
-        self.action_space = Box(low=np.array([self.action_spec['steer'].low[0], self.action_spec['speed'].low[0]]),
-                                high=np.array([self.action_spec['steer'].high[0], self.action_spec['speed'].high[0]]))
+        self.action_spec['vx'] = Box(low=-1., high=1.)
+        self.action_spec['vy'] = Box(low=-1, high=1)
+        self.action_spec['yaw'] = Box(low=-1, high=1)
+        self.action_spec['altitude'] = Box(low=0.0, high=1.2) #meters
+        self.action_space = Box(low=np.array([self.action_spec['vx'].low[0], self.action_spec['vx'].low[0], self.action_spec['yaw'].low[0], self.action_spec['altitude'].low[0]]),
+                                high=np.array([self.action_spec['vx'].high[0], self.action_spec['vx'].high[0], self.action_spec['yaw'].high[0], self.action_spec['altitude'].high[0]]))
 
-        self.action_selection_spec['steer'] = Box(low=self._steer_limits[0], high=self._steer_limits[1])
-        self.action_selection_spec['speed'] = Box(low=self._speed_limits[0], high=self._speed_limits[1])
-        self.action_selection_space = Box(low=np.array([self.action_selection_spec['steer'].low[0],
-                                                        self.action_selection_spec['speed'].low[0]]),
-                                          high=np.array([self.action_selection_spec['steer'].high[0],
-                                                         self.action_selection_spec['speed'].high[0]]))
+        self.action_selection_spec['vx'] = Box(low=self._velocity_limits[0], high=self._velocity_limits[1])
+        self.action_selection_spec['vy'] = Box(low=self._velocity_limits[0], high=self._velocity_limits[1])
+        self.action_selection_spec['altitude_target'] = Box(low=self._altitude_target, high=self._altitude_target)
+        self.action_selection_space = Box(low=np.array([self.action_selection_spec['vx'].low[0], self.action_selection_spec['vx'].low[0], self.action_selection_spec['yaw'].low[0], self.action_selection_spec['altitude'].low[0]]),
+                                high=np.array([self.action_selection_spec['vx'].high[0], self.action_selection_spec['vx'].high[0], self.action_selection_spec['yaw'].high[0], self.action_selection_spec['altitude'].high[0]]))
+
+
+        #Box(low=np.array([self.action_selection_spec['steer'].low[0],
+                                          #               self.action_selection_spec['speed'].low[0]]),
+                                          # high=np.array([self.action_selection_spec['steer'].high[0],
+                                          #                self.action_selection_spec['speed'].high[0]]))
 
         assert (np.logical_and(self.action_selection_space.low >= self.action_space.low,
                                self.action_selection_space.high <= self.action_space.high).all())
 
         self.observation_im_space = Box(low=0, high=255, shape=self._obs_shape)
         self.observation_vec_spec['coll'] = Discrete(1)
-        self.observation_vec_spec['heading'] = Box(low=0, high=2 * 3.14)
-        self.observation_vec_spec['speed'] = Box(low=-0.4, high=0.4)
-        self.observation_vec_spec['steer'] = Box(low=-1., high=1.)
-        self.observation_vec_spec['motor'] = Box(low=-1., high=1.)
+        self.observation_vec_spec['accel_x'] = Box(low=-3, high=3) #3 is a guess
+        self.observation_vec_spec['accel_y'] = Box(low=-3, high=3)
+        self.observation_vec_spec['accel_z'] = Box(low=-3., high=3)
+        self.observation_vec_spec['v_batt'] = Box(low=0, high=6)
+        self.observation_vec_spec['alt'] = Box(low=0, high=1.2) #meters
 
     def _get_observation(self):
         msg = self._ros_msgs['camera/image_raw/compressed']
