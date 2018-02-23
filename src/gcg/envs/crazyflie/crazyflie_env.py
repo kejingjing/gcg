@@ -10,6 +10,8 @@ from gcg.envs.spaces.box import Box
 from gcg.envs.spaces.discrete import Discrete
 from gcg.data.logger import logger
 
+from crazyflie.msg import CFMotion
+
 try:
     import rospy
     import rosbag
@@ -271,7 +273,7 @@ class CrazyflieEnv:
     def _get_done(self):
         return self._is_collision
 
-    def _set_steer(self, steer):
+'''    def _set_steer(self, steer):
         self._ros_steer_pub.publish(std_msgs.msg.Float32(steer))
 
     def _set_vel(self, vel):
@@ -288,7 +290,17 @@ class CrazyflieEnv:
             rospy.sleep(0.01)
         self._ros_motor_pub.publish(std_msgs.msg.Float32(0.))
         self._ros_pid_enable_pub.publish(std_msgs.msg.Empty())
-        rospy.sleep(0.25)
+        rospy.sleep(0.25)'''
+
+    def set_motion(self, x, y, yaw, dz):
+    	motion = crazyflie.msg.CFMotion()
+    	motion.x = x
+    	motion.y = y
+    	motion.yaw = yaw
+    	motion.dz = dz
+    	motion.is_flow_motion = True
+    	self._ros_motion_pub.publish(motion)
+
 
     def step(self, action, offline=False):
         if not offline:
@@ -395,8 +407,21 @@ class CrazyflieEnv:
                 self._ros_msgs[topic] = msg
                 self._ros_msg_times[topic] = rospy.Time.now()
         else:
-            self._ros_msgs[topic] = msg
-            self._ros_msg_times[topic] = rospy.Time.now()
+            #CF data unpacking
+            if 'data' in topic:
+                self._ros_msgs['accel_x'] = msg.accel_x
+                self._ros_msg_times['accel_x'] = rospy.Time.now()
+                self._ros_msgs['accel_y'] = msg.accel_y
+                self._ros_msg_times['accel_y'] = rospy.Time.now()
+                self._ros_msgs['accel_z'] = msg.accel_z
+                self._ros_msg_times['accel_z'] = rospy.Time.now()
+                self._ros_msgs['alt'] = msg.alt
+                self._ros_msg_times['alt'] = rospy.Time.now()
+                self._ros_msgs['v_batt'] = msg.v_batt
+                self._ros_msg_times['v_batt'] = rospy.Time.now()
+            else:
+                self._ros_msgs[topic] = msg
+                self._ros_msg_times[topic] = rospy.Time.now()
 
     def ros_is_good(self, print=True):
         # check that all not commands are coming in at a continuous rate
@@ -413,14 +438,14 @@ class CrazyflieEnv:
                     return False
 
         # check if in python mode
-        if self._ros_msgs.get('mode') is None or self._ros_msgs['mode'].data != 2:
-            if print:
-                logger.debug('In mode {0}'.format(self._ros_msgs.get('mode')))
-            return False
+        # if self._ros_msgs.get('mode') is None or self._ros_msgs['mode'].data != 2:
+        #     if print:
+        #         logger.debug('In mode {0}'.format(self._ros_msgs.get('mode')))
+        #     return False
 
-        if self._ros_msgs['collision/flip'].data:
+        if self._ros_msgs['cf/0/collision'].data:
             if print:
-                logger.warn('Car has flipped, please unflip it to continue')
+                logger.warn('Crazyflie has crashed! Flip it if it\'s not already upright')
             self._is_collision = False # otherwise will stay flipped forever
             return False
         
