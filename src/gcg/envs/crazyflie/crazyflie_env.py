@@ -188,6 +188,7 @@ class CrazyflieEnv:
         self._ros_rolloutbag = RolloutRosbag()
         self._t = 0
         
+        
     def _setup_spec(self):
         self.action_spec = OrderedDict()
         self.action_selection_spec = OrderedDict()
