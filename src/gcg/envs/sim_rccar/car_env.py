@@ -1,9 +1,10 @@
 import sys
 from math import pi
 from collections import OrderedDict
-
 import cv2
 import numpy as np
+import os
+
 from direct.showbase.DirectObject import DirectObject
 from direct.showbase.ShowBase import ShowBase
 from panda3d.bullet import BulletBoxShape
@@ -25,6 +26,8 @@ from gcg.envs.env_spec import EnvSpec
 from gcg.envs.sim_rccar.panda3d_camera_sensor import Panda3dCameraSensor
 from gcg.envs.spaces.box import Box
 from gcg.envs.spaces.discrete import Discrete
+from gcg.data.logger import logger
+
 
 class CarEnv(DirectObject):
     def __init__(self, params={}):
@@ -36,11 +39,13 @@ class CarEnv(DirectObject):
         self._do_back_up = self._params.get('do_back_up', False)
         self._use_depth = self._params.get('use_depth', False)
         self._use_back_cam = self._params.get('use_back_cam', False)
-        # TODO
+
+        self._collision_reward_only = self._params.get('collision_reward_only', False)
         self._collision_reward = self._params.get('collision_reward', -10.0)
         self._obs_shape = self._params.get('obs_shape', (64, 36))
         self._steer_limits = params.get('steer_limits', (-30., 30.))
         self._speed_limits = params.get('speed_limits', (-4.0, 4.0))
+        self._motor_limits = params.get('motor_limits', (-0.5, 0.5))
         self._fixed_speed = (self._speed_limits[0] == self._speed_limits[1] and self._use_vel)
         if not self._params.get('visualize', False):
             loadPrcFileData('', 'window-type offscreen')
@@ -138,6 +143,7 @@ class CarEnv(DirectObject):
         self._steering = 0.0       # degree
         self._engineForce = 0.0
         self._brakeForce = 0.0
+        self._env_time_step = 0
         self._p = self._params.get('p', 1.25) 
         self._d = self._params.get('d', 0.0)
         self._last_err = 0.0
@@ -148,7 +154,14 @@ class CarEnv(DirectObject):
 
         self._setup_spec()
 
-        self.spec = EnvSpec(self.observation_im_space, self.action_space, self.observation_vec_spec, self.action_spec, self.goal_spec)
+        self.spec = EnvSpec(
+            observation_im_space=self.observation_im_space,
+            action_space=self.action_space,
+            action_selection_space=self.action_selection_space,
+            observation_vec_spec=self.observation_vec_spec,
+            action_spec=self.action_spec,
+            action_selection_spec=self.action_selection_spec,
+            goal_spec=self.goal_spec)
 
         if self._run_as_task:
             self._mark_d = 0.0
@@ -157,34 +170,45 @@ class CarEnv(DirectObject):
 
     def _setup_spec(self):
         self.action_spec = OrderedDict()
-        self.unnormalized_action_spec = OrderedDict()
+        self.action_selection_spec = OrderedDict()
         self.observation_vec_spec = OrderedDict()
         self.goal_spec = OrderedDict()
 
-        self.action_spec['steer'] = Box(low=-1., high=1.)
-        self.unnormalized_action_spec['steer'] = Box(low=self._steer_limits[0], high=self._steer_limits[1])
-        
+        self.action_spec['steer'] = Box(low=-45., high=45.)
+        self.action_selection_spec['steer'] = Box(low=self._steer_limits[0], high=self._steer_limits[1])
+
         if self._use_vel:
-            if self._fixed_speed:
-                self.action_spec['speed'] = Box(low=1., high=1.)            
-                self.action_space = Box(low=np.array([-1., 1.]), high=np.array([1., 1.]))
-            else:
-                self.action_spec['speed'] = Box(low=-1., high=1.)
-                self.action_space = Box(low=np.array([-1., -1.]), high=np.array([1., 1.]))
-            self.unnormalized_action_spec['speed'] = Box(low=self._speed_limits[0], high=self._speed_limits[1])
-            self.unnormalized_action_space = Box(low=np.array([self._steer_limits[0], self._speed_limits[0]]),
-                                                 high=np.array([self._steer_limits[1], self._speed_limits[1]]))
+            self.action_spec['speed'] = Box(low=-4., high=4.)
+            self.action_space = Box(low=np.array([self.action_spec['steer'].low[0], self.action_spec['speed'].low[0]]),
+                                    high=np.array([self.action_spec['steer'].high[0], self.action_spec['speed'].high[0]]))
+
+            self.action_selection_spec['speed'] = Box(low=self._speed_limits[0], high=self._speed_limits[1])
+            self.action_selection_space = Box(low=np.array([self.action_selection_spec['steer'].low[0],
+                                                            self.action_selection_spec['speed'].low[0]]),
+                                              high=np.array([self.action_selection_spec['steer'].high[0],
+                                                             self.action_selection_spec['speed'].high[0]]))
         else:
-            self.action_spec['motor'] = Box(low=-1., high=1.)
-            self.action_space = Box(low=np.array([-1., -1.]), high=np.array([1., 1.]))
-            self.unnormalized_action_spec['motor'] = Box(low=-self._accelClamp, high=self._accelClamp)
-            self.unnormalized_action_space = Box(low=np.array([self._steer_limits[0], -self._accelClamp]),
-                                                 high=np.array([self._steer_limits[1], self._accelClamp]))
+            self.action_spec['motor'] = Box(low=-self._accelClamp, high=self._accelClamp)
+            self.action_space = Box(low=np.array([self.action_spec['steer'].low[0], self.action_spec['motor'].low[0]]),
+                                    high=np.array([self.action_spec['steer'].high[0], self.action_spec['motor'].high[0]]))
+
+            self.action_selection_spec['motor'] = Box(low=self._motor_limits[0], high=self._motor_limits[1])
+            self.action_selection_space = Box(low=np.array([self.action_selection_spec['steer'].low[0],
+                                                            self.action_selection_spec['motor'].low[0]]),
+                                              high=np.array([self.action_selection_spec['steer'].high[0],
+                                                             self.action_selection_spec['motor'].high[0]]))
+
+        assert (np.logical_and(self.action_selection_space.low >= self.action_space.low - 1e-4,
+                               self.action_selection_space.high <= self.action_space.high + 1e-4).all())
 
         self.observation_im_space = Box(low=0, high=255, shape=tuple(self._get_observation()[0].shape))
         self.observation_vec_spec['coll'] = Discrete(1)
         self.observation_vec_spec['heading'] = Box(low=0, high=2 * 3.14)
         self.observation_vec_spec['speed'] = Box(low=-4.0, high=4.0)
+
+    @property
+    def _base_dir(self):
+        return os.path.join(os.path.dirname(os.path.abspath(__file__)), 'models')
 
     @property
     def horizon(self):
@@ -292,29 +316,8 @@ class CarEnv(DirectObject):
                 print("Issue")
 
     def _setup_restart_pos(self):
-        self._restart_pos = []
         self._restart_index = 0
-        if self._params.get('position_ranges', None) is not None:
-            ranges = self._params['position_ranges']
-            num_pos = self._params['num_pos']
-            if self._params.get('range_type', 'random') == 'random':
-                for _ in range(num_pos):
-                    ran = ranges[np.random.randint(len(ranges))]
-                    self._restart_pos.append(np.random.uniform(ran[0], ran[1]))
-            elif self._params['range_type'] == 'fix_spacing':
-                num_ran = len(ranges)
-                num_per_ran = num_pos // num_ran
-                for i in range(num_ran):
-                    ran = ranges[i]
-                    low = np.array(ran[0])
-                    diff = np.array(ran[1]) - np.array(ran[0])
-                    for j in range(num_per_ran):
-                        val = diff * ((j + 0.0) / num_per_ran) + low
-                        self._restart_pos.append(val)
-        elif self._params.get('positions', None) is not None:
-            self._restart_pos = self._params['positions']
-        else:
-            self._restart_pos = self._default_restart_pos()
+        self._restart_pos = self._default_restart_pos()
 
     def _next_restart_pos_hpr(self):
         num = len(self._restart_pos)
@@ -325,23 +328,14 @@ class CarEnv(DirectObject):
             self._restart_index = (self._restart_index + 1) % num
             return pos_hpr[:3], pos_hpr[3:]
 
-    def _next_random_restart_pos_hpr(self):
-        num = len(self._restart_pos)
-        if num == 0:
-            return None, None
-        else:
-            index = np.random.randint(num)
-            pos_hpr = self._restart_pos[index]
-            self._restart_index = (self._restart_index + 1) % num
-            return pos_hpr[:3], pos_hpr[3:]
-
     def _setup_light(self):
-        alight = AmbientLight('ambientLight')
-        alight.setColor(Vec4(0.5, 0.5, 0.5, 1))
-        alightNP = render.attachNewNode(alight)
-        render.clearLight()
-        render.setLight(alightNP)
-
+#        alight = AmbientLight('ambientLight')
+#        alight.setColor(Vec4(0.5, 0.5, 0.5, 1))
+#        alightNP = render.attachNewNode(alight)
+#        render.clearLight()
+#        render.setLight(alightNP)
+        pass
+    
     # Vehicle
     def _default_pos(self):
         return (0.0, 0.0, 0.3)
@@ -349,7 +343,7 @@ class CarEnv(DirectObject):
     def _default_hpr(self):
         return (0.0, 0.0, 0.0)
 
-    def _default_restart_pos():
+    def _default_restart_pos(self):
         return [self._default_pos() + self._default_hpr()]
 
     def _get_speed(self):
@@ -372,7 +366,6 @@ class CarEnv(DirectObject):
         self._vehicle.setBrake(self._brakeForce, 1)
         self._vehicle.setBrake(self._brakeForce, 2)
         self._vehicle.setBrake(self._brakeForce, 3)
-
         if dt >= self._step:
             # TODO maybe change number of timesteps
 #            for i in range(int(dt/self._step)):
@@ -494,10 +487,16 @@ class CarEnv(DirectObject):
             return im.astype(np.uint8)
 
     def _get_reward(self):
-        if self._collision:
-            reward = self._collision_reward
+        if self._collision_reward_only:
+            if self._collision:
+                reward = self._collision_reward
+            else:
+                reward = 0.0
         else:
-            reward = self._get_speed()
+            if self._collision:
+                reward = self._collision_reward
+            else:
+                reward = self._get_speed()
         assert (reward <= self.max_reward)
         return reward
 
@@ -510,16 +509,19 @@ class CarEnv(DirectObject):
         info['hpr'] = np.array(self._vehicle_pointer.getHpr())
         info['vel'] = self._get_speed()
         info['coll'] = self._collision
+        info['env_time_step'] = self._env_time_step
         return info
     
     def _back_up(self):
         assert(self._use_vel)
-        back_up_vel = self._params['back_up'].get('vel', -2.0) 
+#        logger.debug('Backing up!')
+        self._params['back_up'] = self._params.get('back_up', {}) 
+        back_up_vel = self._params['back_up'].get('vel', -1.0) 
         self._des_vel = back_up_vel
         back_up_steer = self._params['back_up'].get('steer', (-5.0, 5.0))
         self._steering = np.random.uniform(*back_up_steer)
         self._brakeForce = 0.
-        duration = self._params['back_up'].get('duration', 1.0)
+        duration = self._params['back_up'].get('duration', 3.0)
         self._update(dt=duration)
         self._des_vel = 0.
         self._steering = 0.
@@ -528,35 +530,26 @@ class CarEnv(DirectObject):
 
     def _is_contact(self):
         result = self._world.contactTest(self._vehicle_node)
-        num_contacts = result.getNumContacts()
         return result.getNumContacts() > 0
 
     # Environment functions
 
-    def reset(self, pos=None, hpr=None, hard_reset=False, random_reset=False):
+    def reset(self, pos=None, hpr=None, hard_reset=False):
         if self._do_back_up and not hard_reset and \
                 pos is None and hpr is None:
             if self._collision:
                 self._back_up()
         else:
+            if hard_reset:
+                logger.debug('Hard resetting!')
             if pos is None and hpr is None:
-                if random_reset:
-                    pos, hpr = self._next_random_restart_pos_hpr()
-                else:
-                    pos, hpr = self._next_restart_pos_hpr()
+                pos, hpr = self._next_restart_pos_hpr()
             self._place_vehicle(pos=pos, hpr=hpr)
         self._collision = False
+        self._env_time_step = 0
         return self._get_observation(), self._get_goal()
 
     def step(self, action):
-        lb, ub = self.unnormalized_action_space.bounds
-        scaled_action = lb + (action + 1.) * 0.5 * (ub - lb)
-        scaled_action = np.clip(scaled_action, lb, ub)
-
-        if self._fixed_speed:
-            scaled_action[1] = self._speed_limits[0]
-        action = scaled_action
-        
         self._steering = action[0]
         if action[1] == 0.0:
             self._brakeForce = 1000.
@@ -574,6 +567,7 @@ class CarEnv(DirectObject):
         reward = self._get_reward() 
         done = self._get_done()
         info = self._get_info()
+        self._env_time_step += 1
         return observation, goal, reward, done, info
 
 if __name__ == '__main__':

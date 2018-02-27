@@ -8,21 +8,19 @@ Click below to view video
 
 [![IMAGE ALT TEXT HERE](https://img.youtube.com/vi/vgiW0HlQWVE/0.jpg)](https://www.youtube.com/watch?v=vgiW0HlQWVE)
 
-TODO: everything below here is out of date
-
 ---
 # Code
 
-This repository contains the code to run the simulation experiments. The main code is in [sandbox/gkahn/gcg](https://github.com/gkahn13/gcg/tree/gcg_release/sandbox/gkahn/gcg), while the rllab code was used for infrastructure purposes (e.g., running experiments on EC2).
+This repository contains the code to run the simulation experiments.
 
 ---
 ### Installation
 
-Clone the repository and add it to your PYTHONPATH
+Clone the repository and add the src/ directory to your PYTHONPATH
 
 Install [Anaconda using the Python 2.7 installer](https://www.anaconda.com/download/).
 
-We will always assume the current directory is [sandbox/gkahn/gcg](https://github.com/gkahn13/gcg/tree/gcg_release/sandbox/gkahn/gcg). Create a new Anaconda environment and activate it:
+Create a new Anaconda environment and activate it:
 ```bash
 $ CONDA_SSL_VERIFY=false conda env create -f environment.yml
 $ source activate gcg
@@ -44,7 +42,7 @@ And disabling "Sync to VBLank" under "OpenGL Settings"
 
 To drive in the simulation environment, run
 ```bash
-$ python envs/rccar/square_cluttered_env.py
+$ python src/gcg/envs/sim_rccar/square_cluttered_env.py
 ```
 
 The commands are
@@ -58,21 +56,23 @@ The commands are
 ---
 ### Yaml experiment configuration files
 
-The [yamls](https://github.com/gkahn13/gcg/tree/gcg_release/sandbox/gkahn/gcg/yamls) folder contains experiment configuration files for [Double Q-learning](https://github.com/gkahn13/gcg/tree/gcg_release/sandbox/gkahn/gcg/yamls/dql.yaml) , [5-step Double Q-learning](https://github.com/gkahn13/gcg/tree/gcg_release/sandbox/gkahn/gcg/yamls/nstep_dql.yaml) , and [our approach](https://github.com/gkahn13/gcg/tree/gcg_release/sandbox/gkahn/gcg/yamls/ours.yaml).
+The [yamls](https://github.com/gkahn13/gcg/blob/master/yamls/) folder contains experiment configuration files for [Double Q-learning](https://github.com/gkahn13/gcg/blob/master/yamls/sim_rccar/benchmarks/coll_dql.yaml) and [our approach](https://github.com/gkahn13/gcg/blob/master/yamls/sim_rccar/benchmarks/coll_ours.yaml).
 
 These yaml files can be adapted to form alternative instantiations of the generalized computation graph. Please see the example yaml files for detailed descriptions.
 
 ---
 ### Running the code
 
-To run our approach, execute
+First, create the folder data/ in the main directory.
+
+Then, to run our approach, execute
 ```bash
-$ python run_exp.py --exps ours
+$ python scripts/run_exp.py --exps sim_rccar/benchmarks/coll_ours
 ```
 
-The results will be stored in the gcg/data folder.
+The results will be stored in the data/ folder.
 
-You can run other yaml files by replacing "ours" with the desired yaml file name (e.g., "dql" or "nstep_dql")
+You can run other yaml files by replacing "ours" with the desired yaml file name.
 
 ---
 ### References

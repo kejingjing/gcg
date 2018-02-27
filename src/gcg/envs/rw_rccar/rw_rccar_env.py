@@ -1,5 +1,5 @@
 import os
-
+from collections import OrderedDict
 import numpy as np
 # import cv2
 from PIL import Image
@@ -7,7 +7,7 @@ from io import BytesIO
 
 from gcg.envs.env_spec import EnvSpec
 from gcg.envs.spaces.box import Box
-
+from gcg.envs.spaces.discrete import Discrete
 from gcg.data.logger import logger
 
 try:
@@ -89,25 +89,34 @@ class RWrccarEnv:
         params.setdefault('horizon', int(5. * 60. / params['dt']))  # 5 minutes worth
         params.setdefault('ros_namespace', '/rccar/')
         params.setdefault('obs_shape', (36, 64, 1))
-        params.setdefault('steer_limits', [-1., 1.])
+        params.setdefault('steer_limits', [-0.9, 0.9])
         params.setdefault('speed_limits', [0.2, 0.2])
         params.setdefault('backup_motor', -0.22)
         params.setdefault('backup_duration', 1.6)
-        params.setdefault('backup_steer_range', (-0.5, 0.5))
+        params.setdefault('backup_steer_range', (-0.8, 0.8))
         params.setdefault('press_enter_on_reset', False)
 
+        self._use_vel = True
+        self._obs_shape = params['obs_shape']
+        self._steer_limits = params['steer_limits']
+        self._speed_limits = params['speed_limits']
+        self._fixed_speed = (self._speed_limits[0] == self._speed_limits[1] and self._use_vel)
         self._collision_reward = params['collision_reward']
         self._collision_reward_only = params['collision_reward_only']
 
         self._dt = params['dt']
         self.horizon = params['horizon']
 
-        self.action_space = Box(low=np.array([params['steer_limits'][0], params['speed_limits'][0]]),
-                                high=np.array([params['steer_limits'][1], params['speed_limits'][1]]))
-        self.observation_im_space = Box(low=0, high=255, shape=params['obs_shape'])
-        self.observation_vec_space = Box(np.array([]), np.array([]))
+        self._setup_spec()
         assert (self.observation_im_space.shape[-1] == 1 or self.observation_im_space.shape[-1] == 3)
-        self.spec = EnvSpec(self.observation_im_space, self.observation_vec_space, self.action_space)
+        self.spec = EnvSpec(
+            observation_im_space=self.observation_im_space,
+            action_space=self.action_space,
+            action_selection_space=self.action_selection_space,
+            observation_vec_spec=self.observation_vec_spec,
+            action_spec=self.action_spec,
+            action_selection_spec=self.action_selection_spec,
+            goal_spec=self.goal_spec)
 
         self._last_step_time = None
         self._is_collision = False
@@ -130,12 +139,10 @@ class RWrccarEnv:
             ('mode', std_msgs.msg.Int32),
             ('steer', std_msgs.msg.Float32),
             ('motor', std_msgs.msg.Float32),
-            ('battery/a', std_msgs.msg.Float32),
-            ('battery/b', std_msgs.msg.Float32),
-            ('battery/low', std_msgs.msg.Int32),
             ('encoder/left', std_msgs.msg.Float32),
             ('encoder/right', std_msgs.msg.Float32),
             ('encoder/both', std_msgs.msg.Float32),
+            ('encoder/error', std_msgs.msg.Int32),
             ('orientation/quat', geometry_msgs.msg.Quaternion),
             ('orientation/rpy', geometry_msgs.msg.Vector3),
             ('imu', geometry_msgs.msg.Accel),
@@ -162,8 +169,34 @@ class RWrccarEnv:
 
         self._ros_rolloutbag = RolloutRosbag()
         self._t = 0
+            
+    def _setup_spec(self):
+        self.action_spec = OrderedDict()
+        self.action_selection_spec = OrderedDict()
+        self.observation_vec_spec = OrderedDict()
+        self.goal_spec = OrderedDict()
 
-        rospy.sleep(1)
+        self.action_spec['steer'] = Box(low=-1., high=1.)
+        self.action_spec['speed'] = Box(low=-0.3, high=0.3)
+        self.action_space = Box(low=np.array([self.action_spec['steer'].low[0], self.action_spec['speed'].low[0]]),
+                                high=np.array([self.action_spec['steer'].high[0], self.action_spec['speed'].high[0]]))
+
+        self.action_selection_spec['steer'] = Box(low=self._steer_limits[0], high=self._steer_limits[1])
+        self.action_selection_spec['speed'] = Box(low=self._speed_limits[0], high=self._speed_limits[1])
+        self.action_selection_space = Box(low=np.array([self.action_selection_spec['steer'].low[0],
+                                                        self.action_selection_spec['speed'].low[0]]),
+                                          high=np.array([self.action_selection_spec['steer'].high[0],
+                                                         self.action_selection_spec['speed'].high[0]]))
+
+        assert (np.logical_and(self.action_selection_space.low >= self.action_space.low,
+                               self.action_selection_space.high <= self.action_space.high).all())
+
+        self.observation_im_space = Box(low=0, high=255, shape=self._obs_shape)
+        self.observation_vec_spec['coll'] = Discrete(1)
+        self.observation_vec_spec['heading'] = Box(low=0, high=2 * 3.14)
+        self.observation_vec_spec['speed'] = Box(low=-0.4, high=0.4)
+        self.observation_vec_spec['steer'] = Box(low=-1., high=1.)
+        self.observation_vec_spec['motor'] = Box(low=-1., high=1.)
 
     def _get_observation(self):
         msg = self._ros_msgs['camera/image_raw/compressed']
@@ -183,9 +216,19 @@ class RWrccarEnv:
                                                Image.ANTIALIAS)  # b/c (width, height)
             im = np.array(rgb_resized)
 
-        vec = np.array([])
+        coll = self._is_collision
+        heading = self._ros_msgs['orientation/rpy'].z
+        speed = self._get_speed()
+        steer = self._ros_msgs['steer'].data
+        motor = self._ros_msgs['motor'].data
+
+        vec = np.array([coll, heading, speed, steer, motor])
 
         return im, vec
+
+    def _get_goal(self):
+        # TODO: make sure if there is a goal, to add it as a ROS msg
+        return np.array([])
 
     def _get_speed(self):
         return self._ros_msgs['encoder/both'].data
@@ -226,8 +269,12 @@ class RWrccarEnv:
         if not offline:
             assert (self.ros_is_good())
 
-        lb, ub = self.action_space.bounds
-        action = np.clip(action, lb, ub)
+        action = np.asarray(action)
+        if not (np.logical_and(action >= self.action_space.low, action <= self.action_space.high).all()):
+            logger.warn('Action {0} will be clipped to be within bounds: {1}, {2}'.format(action,
+                                                                                          self.action_space.low,
+                                                                                          self.action_space.high))
+            action = np.clip(action, self.action_space.low, self.action_space.high)
 
         cmd_steer, cmd_vel = action
         self._set_steer(cmd_steer)
@@ -238,6 +285,7 @@ class RWrccarEnv:
             self._last_step_time = rospy.Time.now()
 
         next_observation = self._get_observation()
+        goal = self._get_goal()
         reward = self._get_reward()
         done = self._get_done()
         env_info = dict()
@@ -251,19 +299,22 @@ class RWrccarEnv:
                 self._t = 0
                 self._ros_rolloutbag.close()
 
-        return next_observation, reward, done, env_info
+        return next_observation, goal, reward, done, env_info
 
-    def reset(self, offline=False):
+    def reset(self, offline=False, keep_rosbag=False):
         if offline:
             self._is_collision = False
-            return self._get_observation()
+            return self._get_observation(), self._get_goal()
 
         assert (self.ros_is_good())
-
+        
         if self._ros_rolloutbag.is_open:
-            # should've been closed in step when done
-            logger.debug('Trashing bag')
-            self._ros_rolloutbag.trash()
+            if keep_rosbag:
+                self._ros_rolloutbag.close()
+            else:
+                # should've been closed in step when done
+                logger.debug('Trashing bag')
+                self._ros_rolloutbag.trash()
 
         if self._press_enter_on_reset:
             logger.info('Resetting, press enter to continue')
@@ -274,16 +325,10 @@ class RWrccarEnv:
             else:
                 logger.debug('Resetting (no collision)')
 
-            if self._ros_msgs['collision/flip'].data:
-                logger.warn('Car has flipped, please unflip it to continue')
-                while self._ros_msgs['collision/flip'].data:
-                    rospy.sleep(0.1)
-                logger.warn('Car is now unflipped. Continuing...')
-                rospy.sleep(1.)
-
-            backup_steer = np.random.uniform(*self._backup_steer_range)
-            self._set_steer(backup_steer)
-            self._set_motor(self._backup_motor, self._backup_duration)
+            if self._backup_duration > 0:
+                backup_steer = np.random.uniform(*self._backup_steer_range)
+                self._set_steer(backup_steer)
+                self._set_motor(self._backup_motor, self._backup_duration)
             self._set_steer(0.)
             self._set_vel(0.)
 
@@ -297,7 +342,7 @@ class RWrccarEnv:
 
         assert (self.ros_is_good())
 
-        return self._get_observation()
+        return self._get_observation(), self._get_goal()
 
     ###########
     ### ROS ###
@@ -305,25 +350,42 @@ class RWrccarEnv:
 
     def ros_msg_update(self, msg, args):
         topic = args[0]
-        self._ros_msgs[topic] = msg
-        self._ros_msg_times[topic] = rospy.Time.now()
 
-        if topic == 'collision/all':
+
+        if 'collision' in topic:
             if msg.data == 1:
                 self._is_collision = True
 
-                # if 'collision' in topic and msg.data == 1 and 'all' not in topic:
-                #    logger.debug(topic)
+            if self._is_collision:
+                if msg.data == 1:
+                    # if is_collision and current is collision, update
+                    self._ros_msgs[topic] = msg
+                    self._ros_msg_times[topic] = rospy.Time.now()
+                else:
+                    if self._ros_msgs[topic].data != 1:
+                        # if is collision, but previous message is not collision, then this topic didn't cause a colision
+                        self._ros_msgs[topic] = msg
+                        self._ros_msg_times[topic] = rospy.Time.now()
+            else:
+                # always update if not in collision
+                self._ros_msgs[topic] = msg
+                self._ros_msg_times[topic] = rospy.Time.now()
+        else:
+            self._ros_msgs[topic] = msg
+            self._ros_msg_times[topic] = rospy.Time.now()
 
     def ros_is_good(self, print=True):
         # check that all not commands are coming in at a continuous rate
         for topic in self._ros_topics_and_types.keys():
             if 'cmd' not in topic and 'collision' not in topic:
+                if topic not in self._ros_msg_times:
+                    if print:
+                        logger.debug('Topic {0} has never been received'.format(topic))
+                    return False
                 elapsed = (rospy.Time.now() - self._ros_msg_times[topic]).to_sec()
                 if elapsed > self._dt:
                     if print:
-                        logger.debug(
-                            'Topic {0} was received {1} seconds ago (dt is {2})'.format(topic, elapsed, self._dt))
+                        logger.debug('Topic {0} was received {1} seconds ago (dt is {2})'.format(topic, elapsed, self._dt))
                     return False
 
         # check if in python mode
@@ -332,10 +394,15 @@ class RWrccarEnv:
                 logger.debug('In mode {0}'.format(self._ros_msgs.get('mode')))
             return False
 
-        # check if battery is low
-        if self._ros_msgs.get('battery/low') is None or self._ros_msgs['battery/low'].data == 1:
+        if self._ros_msgs['collision/flip'].data:
             if print:
-                logger.debug('Low battery!')
+                logger.warn('Car has flipped, please unflip it to continue')
+            self._is_collision = False # otherwise will stay flipped forever
             return False
 
+        if self._ros_msgs['encoder/error'].data:
+            if print:
+                logger.warn('Encoder error')
+            return False
+        
         return True

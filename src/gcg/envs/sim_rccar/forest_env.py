@@ -3,11 +3,13 @@ import os, random
 from gcg.envs.sim_rccar.room_cluttered_env import RoomClutteredEnv
 
 class ForestEnv(RoomClutteredEnv):
-    def __init__(self, params={}):
-        self._base_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'models')
-        params.setdefault('model_path', os.path.join(self._base_dir, 'outdoors.egg'))
-        params.setdefault('obj_paths', ['rock4.egg', 'rock5.egg', 'tree8.egg', 'tree9.egg'])
-        RoomClutteredEnv.__init__(self, params=params)
+    @property
+    def _model_path(self): 
+        return os.path.join(self._base_dir, 'outdoors.egg')
+
+    def _setup_object_paths(self):
+        obj_paths = ['rock4.egg', 'rock5.egg', 'tree8.egg', 'tree9.egg']
+        self._obj_paths = [os.path.join(self._base_dir, x) for x in obj_paths]
 
     def _setup_map(self):
         # TODO maybe stagger
@@ -17,13 +19,13 @@ class ForestEnv(RoomClutteredEnv):
         for i in range(2, 27, 5):
             for j in range(2, 27, 5):
                 if (i != 2 and i != 22) or (j!=2 and j!=22):
-                    pos = (i - 12., j - 12., 0.0)
+                    pos = (i - 12., j - 12., 0.1)
                     # path = random.choice(self._obj_paths)
                     path = self._obj_paths[index % max_len]
                     angle = oris[(index // max_len) % 4]
                     hpr = (angle, 0.0, 0.0)
                     scale = 1 if 'tree' in path else 0.4
-                    self._setup_collision_object(path, pos, hpr, scale=scale)
+                    self._setup_collision_object(path, pos, hpr, scale=scale, is_obstacle=True)
                     index += 1
         self._setup_collision_object(self._model_path)
 

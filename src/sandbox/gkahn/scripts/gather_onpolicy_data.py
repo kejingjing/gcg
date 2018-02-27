@@ -94,7 +94,7 @@ class GatherOnpolicyData(object):
         :return: iteration that it is currently on
         """
         itr = 0
-        while len(glob.glob(self._train_policy_file_name(itr) + '*')) > 0:
+        while len(glob.glob(os.path.splitext(self._train_policy_file_name(itr))[0] + '*')) > 0:
             itr += 1
 
         if itr > 0:
@@ -123,7 +123,7 @@ class GatherOnpolicyData(object):
         itr = 0
         logger.info('Step {0}'.format(step))
         while step < self._steps:
-            self._sampler.step(step, take_random_actions=True)
+            self._sampler.step(step, take_random_actions=False)
             step += 1
 
             if step > 0 and step % 1000 == 0:

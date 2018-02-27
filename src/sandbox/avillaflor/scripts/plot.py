@@ -102,15 +102,24 @@ class Plot:
         for itr, rollout in enumerate(rollouts):
             for trajectory in rollout:
                 env_infos = trajectory['env_infos'][:-1]
-                reward = sum([env_info['reward'] for env_info in env_infos])
+#                reward = sum([ for env_info in env_infos])
+                reward = sum(trajectory['rewards'][:-1])
+#                reward = np.mean([env_info['vel'] for env_info in env_infos[8:-1]])
+#                reward = len(trajectory['rewards'][:-1])
                 coll = int(env_infos[-1]['coll'])
                 rewards.append(reward)
                 crashes.append(coll)
-                for time in range(len(trajectory['rewards'])):
-                    time_tot += 1./240.
-                    times.append(time_tot)
-                    avg_crashes.append(np.mean(crashes[-120:]))
-                    avg_rewards.append(np.mean(rewards[-120:]))
+                if not testing:
+                    for time in range(len(trajectory['rewards'])):
+                        time_tot += 1./240.
+                        times.append(time_tot)
+                        avg_crashes.append(np.mean(crashes[-20:]))
+                        avg_rewards.append(np.mean(rewards[-20:]))
+            if testing:
+                time_tot += 10000./240.
+                times.append(time_tot)
+                avg_crashes.append(np.mean(crashes[-80:]))
+                avg_rewards.append(np.mean(rewards[-80:]))
 
         return avg_crashes, avg_rewards, times
 
@@ -147,8 +156,8 @@ class Plot:
             plt.xlabel('X position')
             plt.ylabel('Y position')
             # TODO
-            plt.ylim([-12.5, 12.5])
-            plt.xlim([-12.5, 12.5])
+            plt.ylim([-22.5, 22.5])
+            plt.xlim([-22.5, 22.5])
             plt.legend(handles=[blue_line, red_line], loc='center')
             for trajectory in rollout:
                 env_infos = trajectory['env_infos'][:-1]

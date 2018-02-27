@@ -219,9 +219,15 @@ class GCGPolicy(object):
         # tf.assert_equal(tf.shape(tf_obs_lowd)[0], tf.shape(tf_actions_ph)[0])
 
         with tf.variable_scope(self._action_scope):
+            ### whiten the actions
+            action_space = self._env_spec.action_space
+            action_mean = np.tile(0.5 * (action_space.low + action_space.high), (self._H, 1))
+            action_scale = np.tile(action_space.high - action_space.low, (self._H, 1))
+            tf_actions = (tf_actions_ph - action_mean) / action_scale
+
             self._action_graph.update({'output_dim': self._observation_graph['output_dim']})
             self._action_graph.update({'batch_size': batch_size})
-            rnn_inputs = networks.fcnn(tf_actions_ph, self._action_graph, is_training=is_training,
+            rnn_inputs = networks.fcnn(tf_actions, self._action_graph, is_training=is_training,
                                           T=H, global_step_tensor=self.global_step)
 
         with tf.variable_scope(self._rnn_scope):
@@ -287,13 +293,13 @@ class GCGPolicy(object):
         return values
     
     def _graph_generate_random_actions(self, K):
-        if isinstance(self._env_spec.action_space, Discrete):
+        if isinstance(self._env_spec.action_selection_space, Discrete):
             tf_actions = tf.one_hot(tf.random_uniform([K, 1], minval=0, maxval=self._action_dim, dtype=tf.int32),
                                     depth=self._action_dim,
                                     axis=2)
         else:
-            action_lb = np.expand_dims(self._env_spec.action_space.low, 0)
-            action_ub = np.expand_dims(self._env_spec.action_space.high, 0)
+            action_lb = np.expand_dims(self._env_spec.action_selection_space.low, 0)
+            action_ub = np.expand_dims(self._env_spec.action_selection_space.high, 0)
             tf_actions = (action_ub - action_lb) * tf.random_uniform([K, self._action_dim]) + action_lb
 
         return tf_actions
@@ -312,21 +318,22 @@ class GCGPolicy(object):
         N = self._N
         assert(H <= N)
         get_action_type = get_action_params['type']
+        get_action_selection = get_action_params.get('selection', 'argmax')
         num_obs = tf.shape(tf_obs_im_ph)[0]
 
         ### create actions
         if get_action_type == 'random':
             K = get_action_params[get_action_type]['K']
-            if isinstance(self._env_spec.action_space, Discrete):
+            if isinstance(self._env_spec.action_selection_space, Discrete):
                 tf_actions = tf.one_hot(tf.random_uniform([K, H], minval=0, maxval=self._action_dim, dtype=tf.int32),
                                         depth=self._action_dim,
                                         axis=2)
             else:
-                action_lb = np.expand_dims(self._env_spec.action_space.low, 0)
-                action_ub = np.expand_dims(self._env_spec.action_space.high, 0)
+                action_lb = np.expand_dims(self._env_spec.action_selection_space.low, 0)
+                action_ub = np.expand_dims(self._env_spec.action_selection_space.high, 0)
                 tf_actions = (action_ub - action_lb) * tf.random_uniform([K, H, self._action_dim]) + action_lb
         elif get_action_type == 'lattice':
-            assert(isinstance(self._env_spec.action_space, Discrete))
+            assert(isinstance(self._env_spec.action_selection_space, Discrete))
             indices = cartesian([np.arange(self._action_dim)] * H) + np.r_[0:self._action_dim * H:self._action_dim]
             actions = np.zeros((len(indices), self._action_dim * H))
             for i, one_hots in enumerate(indices):
@@ -366,27 +373,38 @@ class GCGPolicy(object):
        
         ### get_action based on select (policy)
         tf_values_select = tf.reshape(tf_values_select, (num_obs, K))  # [num_obs, K]
-        tf_values_argmax_select = tf.one_hot(tf.argmax(tf_values_select, 1), depth=K)  # [num_obs, K]
+        if get_action_selection == 'argmax':
+            tf_select_chosen = tf.argmax(tf_values_select, axis=1)
+        elif get_action_selection == 'softmax':
+            tf_select_soft_mask = tf.nn.softmax(tf_values_select)
+            tf_select_chosen = tf_utils.sample_categorical(tf_select_soft_mask)
+        else:
+            raise NotImplementedError
+        tf_select_mask = tf.expand_dims(tf.one_hot(tf_select_chosen, depth=K), axis=2)  # [num_obs, K, 1]
         tf_get_action = tf.reduce_sum(
-            tf.tile(tf.expand_dims(tf_values_argmax_select, 2), (1, 1, self._action_dim)) *
-            tf.reshape(tf_actions, (num_obs, K, H, self._action_dim))[:, :, 0, :],
+            tf_select_mask * tf.reshape(tf_actions, (num_obs, K, H, self._action_dim))[:, :, 0, :],
             reduction_indices=1)  # [num_obs, action_dim]
         ### get_action_value based on eval (target)
-        tf_values_eval = tf.reshape(tf_values_eval, (num_obs, K))  # [num_obs, K]
-        tf_get_action_value = tf.reduce_sum(tf_values_argmax_select * tf_values_eval, reduction_indices=1)
-
-        tf_argmax_mask = tf.expand_dims(tf_values_argmax_select, axis=2)
+        if get_action_selection == 'argmax':
+            tf_values_eval = tf.reshape(tf_values_eval, (num_obs, K, 1))  # [num_obs, K, 1]
+            tf_get_action_value = tf.reduce_sum(tf_select_mask * tf_values_eval, axis=(1, 2))
+        elif get_action_selection == 'softmax':
+            tf_values_eval = tf.reshape(tf_values_eval, (num_obs, K))  # [num_obs, K]
+            tf_get_action_value = tf.reduce_sum(tf_select_soft_mask * tf_values_eval, axis=1)
+        else:
+            raise NotImplementedError
+        
         action_values = OrderedDict()
         for key in values_all_eval.keys():
-            action_values[key] = tf.reduce_sum(tf.reshape(values_all_eval[key], (num_obs, K, H)) * tf_argmax_mask, axis=1)
+            action_values[key] = tf.reduce_sum(tf.reshape(values_all_eval[key], (num_obs, K, H)) * tf_select_mask, axis=1)
 
         action_yhats = OrderedDict()
         for key in yhats_all_eval.keys():
-            action_yhats[key] = tf.reduce_sum(tf.reshape(yhats_all_eval[key], (num_obs, K, H)) * tf_argmax_mask, axis=1)
+            action_yhats[key] = tf.reduce_sum(tf.reshape(yhats_all_eval[key], (num_obs, K, H)) * tf_select_mask, axis=1)
 
         action_bhats = OrderedDict()
         for key in bhats_all_eval.keys():
-            action_bhats[key] = tf.reduce_sum(tf.reshape(bhats_all_eval[key], (num_obs, K, H)) * tf_argmax_mask, axis=1)
+            action_bhats[key] = tf.reduce_sum(tf.reshape(bhats_all_eval[key], (num_obs, K, H)) * tf_select_mask, axis=1)
 
         ### check shapes
         assert(tf_get_action.get_shape()[1].value == self._action_dim)
@@ -411,19 +429,30 @@ class GCGPolicy(object):
         """
         batch_size = tf.shape(tf_actions)[0]
 
+        ### whiten the actions
+        action_space = self._env_spec.action_space
+        action_mean = np.tile(0.5 * (action_space.low + action_space.high), (self._H, 1))
+        action_scale = np.tile(action_space.high - action_space.low, (self._H, 1))
+        tf_actions_explore = (tf_actions - action_mean) / action_scale
+
         ### order below matters (gaussian before epsilon greedy, in case you do both types)
-        tf_actions_explore = tf_actions
         if self._gaussian_es:
             tf_explore_ph = tf_es_ph_dict['gaussian']
-            tf_actions_explore = tf.clip_by_value(tf_actions_explore + tf.random_normal(tf.shape(tf_actions_explore)) *
-                                                  tf.tile(tf.expand_dims(tf_explore_ph, 1), (1, self._action_dim)),
-                                                  self._env_spec.action_space.low,
-                                                  self._env_spec.action_space.high)
+            tf_actions_explore = tf_actions_explore + tf.random_normal(tf.shape(tf_actions_explore)) * \
+                                 tf.tile(tf.expand_dims(tf_explore_ph, 1), (1, self._action_dim))
+
+        ### de-whiten the actions
+        tf_actions_explore = (action_scale * tf_actions_explore) + action_mean
+        tf_actions_explore = tf.clip_by_value(tf_actions_explore,
+                                              self._env_spec.action_selection_space.low,
+                                              self._env_spec.action_selection_space.high)
+
+        # (de-whiten before epsilon greedy)    
         if self._epsilon_greedy_es:
             tf_explore_ph = tf_es_ph_dict['epsilon_greedy']
             mask = tf.cast(tf.tile(tf.expand_dims(tf.random_uniform([batch_size]) < tf_explore_ph, 1), (1, self._action_dim)), tf.float32)
             tf_actions_explore = (1 - mask) * tf_actions_explore + mask * self._graph_generate_random_actions(batch_size)
-
+            
         return tf_actions_explore
 
     def _graph_cost(self, values, yhats, bhats, tf_obs_vec_target_ph, tf_rewards_ph, tf_dones_ph, target_inputs, target_values, target_yhats, target_bhats, N=None):      
@@ -496,8 +525,10 @@ class GCGPolicy(object):
             tf_mse = tf.reduce_sum(costs)
 
             ### weight decay
-            if len(tf.get_collection(tf.GraphKeys.REGULARIZATION_LOSSES)) > 0:
-                tf_weight_decay = self._weight_decay * tf.add_n(tf.get_collection(tf.GraphKeys.REGULARIZATION_LOSSES))
+            reg_losses = tf.get_collection(tf.GraphKeys.REGULARIZATION_LOSSES)
+            if len(reg_losses) > 0:
+                num_trainable_vars = float(np.sum([np.prod(v.shape.as_list()) for v in tf.trainable_variables()]))
+                tf_weight_decay = (self._weight_decay / num_trainable_vars) * tf.add_n(reg_losses)
             else:
                 tf_weight_decay = 0
             tf_cost = tf_mse + tf_weight_decay
@@ -697,6 +728,7 @@ class GCGPolicy(object):
                 tf_cost, tf_mse, tf_costs = self._graph_cost(values, yhats, bhats, tf_obs_vec_target_ph, tf_rewards_ph, tf_dones_ph, target_inputs, target_values, target_yhats, target_bhats) 
                 tf_opt, tf_lr_ph = self._graph_optimize(tf_cost, tf_trainable_policy_vars)
             else:
+                tf_costs = []
                 tf_target_vars = tf_update_target_fn = tf_cost = tf_mse = tf_opt = tf_lr_ph = None
 
             ### savers
@@ -745,7 +777,7 @@ class GCGPolicy(object):
         if self._use_target and self._separate_target_params and self._tf_dict['update_target_fn']:
             self._tf_dict['sess'].run(self._tf_dict['update_target_fn'])
 
-    def train_step(self, step, steps, observations, actions, rewards, dones, use_target):
+    def train_step(self, step, steps, observations, goals, actions, rewards, dones, use_target):
         """
         :param steps: [batch_size, N+1]
         :param observations_im: [batch_size, N+1 + obs_history_len-1, obs_im_dim]
@@ -821,7 +853,7 @@ class GCGPolicy(object):
                                                          self._tf_dict['get_action_value']],
                                                         feed_dict=feed_dict)
 
-        if isinstance(self._env_spec.action_space, Discrete):
+        if isinstance(self._env_spec.action_selection_space, Discrete):
             actions = [int(a.argmax()) for a in actions]
 
         return actions, values, ds

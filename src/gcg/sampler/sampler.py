@@ -12,7 +12,7 @@ from gcg.data import mypickle
 
 class Sampler(object):
     def __init__(self, policy, env, n_envs, replay_pool_size, max_path_length, sampling_method,
-                 save_rollouts=False, save_rollouts_observations=True, save_env_infos=False, env_str=None, replay_pool_params={}):
+                 save_rollouts=False, save_rollouts_observations=True, save_env_infos=False, env_dict=None, replay_pool_params={}):
         self._policy = policy
         self._n_envs = n_envs
 
@@ -37,13 +37,15 @@ class Sampler(object):
             try:
                 envs = [pickle.loads(pickle.dumps(env)) for _ in range(self._n_envs)] if self._n_envs > 1 else [env]
             except:
-                envs = [create_env(env_str) for _ in range(self._n_envs)] if self._n_envs > 1 else [env]
+                envs = [create_env(env_dict) for _ in range(self._n_envs)] if self._n_envs > 1 else [env]
         ### need to seed each environment if it is GymEnv
         # TODO: set seed
         self._vec_env = VecEnvExecutor(
             envs=envs,
             max_path_length=max_path_length
         )
+
+        self._curr_observations, self._curr_goals = None, None
 
     @property
     def n_envs(self):
@@ -56,31 +58,38 @@ class Sampler(object):
     ### Add to pools ###
     ####################
 
-    def step(self, step, take_random_actions=False, explore=True):
+    def step(self, step, take_random_actions=False, explore=True, actions=None, **kwargs):
         """ Takes one step in each simulator and adds to respective replay pools """
         ### store last observations and get encoded
         encoded_observations_im = []
         encoded_observations_vec = []
-        for i, (replay_pool, observation) in enumerate(zip(self._replay_pools, self._curr_observations)):
-            replay_pool.store_observation(step + i, observation)
+        for i, (replay_pool, observation, goal) in enumerate(zip(self._replay_pools,
+                                                                 self._curr_observations,
+                                                                 self._curr_goals)):
+            replay_pool.store_observation(step + i, observation, goal)
             encoded_observation = replay_pool.encode_recent_observation()
             encoded_observations_im.append(encoded_observation[0])
             encoded_observations_vec.append(encoded_observation[1])
 
         ### get actions
         if take_random_actions:
-            actions = [self._vec_env.action_space.sample() for _ in range(self._n_envs)]
+            assert (actions is None)
+            actions = [self._vec_env.action_selection_space.sample() for _ in range(self._n_envs)]
             action_infos = [{} for _ in range(self._n_envs)]
         else:
-            actions, _, action_infos = self._policy.get_actions(
-                steps=list(range(step, step + self._n_envs)),
-                current_episode_steps=self._vec_env.current_episode_steps,
-                observations=(encoded_observations_im, encoded_observations_vec),
-                goals=self._curr_goals,
-                explore=explore)
+            if actions is None:
+                actions, _, action_infos = self._policy.get_actions(
+                    steps=list(range(step, step + self._n_envs)),
+                    current_episode_steps=self._vec_env.current_episode_steps,
+                    observations=(encoded_observations_im, encoded_observations_vec),
+                    goals=self._curr_goals,
+                    explore=explore)
+            else:
+                assert (len(actions) == self.n_envs)
+                action_infos = [dict()] * len(actions)
 
         ### take step
-        next_observations, goals, rewards, dones, env_infos = self._vec_env.step(actions)
+        next_observations, goals, rewards, dones, env_infos = self._vec_env.step(actions, **kwargs)
         for env_info, action_info in zip(env_infos, action_infos):
             env_info.update(action_info)
 
@@ -102,8 +111,8 @@ class Sampler(object):
             steps_removed += replay_pool.trash_current_rollout()
         return steps_removed
 
-    def reset(self):
-        self._curr_observations, self._curr_goals = self._vec_env.reset()
+    def reset(self, **kwargs):
+        self._curr_observations, self._curr_goals = self._vec_env.reset(**kwargs)
         for replay_pool in self._replay_pools:
             replay_pool.force_done()
 
@@ -111,15 +120,21 @@ class Sampler(object):
     ### Add rollouts ###
     ####################
 
-    def add_rollouts(self, rollout_filenames, max_to_add=None):
+    def add_rollouts(self, rlist, max_to_add=None):
+        """
+        rlist can contain pkl filenames, or dictionaries
+        """
         step = sum([len(replay_pool) for replay_pool in self._replay_pools])
-        itr = 0
         replay_pools = itertools.cycle(self._replay_pools)
         done_adding = False
 
-        for fname in rollout_filenames:
-            rollouts = mypickle.load(fname)['rollouts']
-            itr += 1
+        for rlist_entry in rlist:
+            if type(rlist_entry) is str:
+                rollouts = mypickle.load(rlist_entry)['rollouts']
+            elif issubclass(type(rlist_entry), dict):
+                rollouts = [rlist_entry]
+            else:
+                raise NotImplementedError
 
             for rollout, replay_pool in zip(rollouts, replay_pools):
                 r_len = len(rollout['dones'])
@@ -149,6 +164,10 @@ class Sampler(object):
     def sample(self, batch_size):
         return ReplayPool.sample_pools(self._replay_pools, batch_size,
                                        only_completed_episodes=self._policy.only_completed_episodes)
+
+    @property
+    def is_done_nexts(self):
+        return self._vec_env.is_done_nexts
 
     ###############
     ### Logging ###

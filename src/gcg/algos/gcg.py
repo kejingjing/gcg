@@ -1,9 +1,9 @@
-import os, glob
+import os, sys, glob
 import numpy as np
 
 from gcg.envs.env_utils import create_env
-from gcg.policies.gcg_policy import GCGPolicy
 from gcg.sampler.sampler import Sampler
+from gcg.policies.gcg_policy import GCGPolicy
 from gcg.data.timer import timeit
 from gcg.data.logger import logger
 from gcg.data import mypickle
@@ -13,7 +13,7 @@ class GCG(object):
     def __init__(self, **kwargs):
 
         self._save_dir = kwargs['save_dir']
-        self._load_dir = kwargs['load_dir']
+        self._load_dir = kwargs.get('load_dir', self._save_dir)
         self._env = kwargs['env']
         self._policy = kwargs['policy']
 
@@ -31,7 +31,7 @@ class GCG(object):
             save_rollouts=kwargs['save_rollouts'],
             save_rollouts_observations=kwargs['save_rollouts_observations'],
             save_env_infos=kwargs['save_env_infos'],
-            env_str=kwargs['env_str'],
+            env_dict=kwargs['env_dict'],
             replay_pool_params=kwargs['replay_pool_params']
         )
 
@@ -138,14 +138,14 @@ class GCG(object):
 
     def _get_train_itr(self):
         train_itr = 0
-        while len(glob.glob(self._inference_policy_file_name(train_itr) + '*')) > 0:
+        while len(glob.glob(os.path.splitext(self._inference_policy_file_name(train_itr))[0] + '*')) > 0:
             train_itr += 1
 
         return train_itr
 
     def _get_inference_itr(self):
         inference_itr = 0
-        while os.path.exists(self._train_rollouts_file_name(inference_itr)):
+        while len(glob.glob(os.path.splitext(self._train_rollouts_file_name(inference_itr))[0] + '*')) > 0:
             inference_itr += 1
 
         return inference_itr
@@ -175,24 +175,30 @@ class GCG(object):
         itr = 0
         while len(glob.glob(os.path.splitext(self._load_train_policy_file_name(itr))[0] + '*')) > 0:
             itr += 1
+        itr -= 1
 
-        if itr > 0:
-            logger.info('Loading train policy from {0} iteration {1}...'.format(self._load_dir, itr - 1))
-            self._policy.restore(self._load_train_policy_file_name(itr - 1), train=True)
+        if itr >= 0:
+            logger.info('Loading train policy from {0} iteration {1}...'.format(self._load_dir, itr))
+            self._policy.restore(self._load_train_policy_file_name(itr), train=True)
             logger.info('Loaded train policy!')
+
+        return itr
 
     def _restore_inference_policy(self):
         """
         :return: iteration that it is currently on
         """
         itr = 0
-        while len(glob.glob(self._load_inference_policy_file_name(itr) + '*')) > 0:
+        while len(glob.glob(os.path.splitext(self._load_inference_policy_file_name(itr))[0] + '*')) > 0:
             itr += 1
+        itr -= 1
 
         if itr > 0:
-            logger.info('Loading inference policy from iteration {0}...'.format(itr - 1))
-            self._policy.restore(self._load_inference_policy_file_name(itr - 1), train=False)
+            logger.info('Loading inference policy from iteration {0}...'.format(itr))
+            self._policy.restore(self._load_inference_policy_file_name(itr), train=False)
             logger.info('Loaded inference policy!')
+
+        return itr
 
     def _restore(self):
         self._restore_train_rollouts()
@@ -248,22 +254,22 @@ class GCG(object):
                 if self._train_every_n_steps >= 1:
                     if step % int(self._train_every_n_steps) == 0:
                         timeit.start('batch')
-                        steps, observations, actions, rewards, dones, _ = \
+                        steps, observations, goals, actions, rewards, dones, _ = \
                             self._sampler.sample(self._batch_size)
                         timeit.stop('batch')
                         timeit.start('train')
-                        self._policy.train_step(step, steps=steps, observations=observations,
+                        self._policy.train_step(step, steps=steps, observations=observations, goals=goals,
                                                 actions=actions, rewards=rewards, dones=dones,
                                                 use_target=target_updated)
                         timeit.stop('train')
                 else:
                     for _ in range(int(1. / self._train_every_n_steps)):
                         timeit.start('batch')
-                        steps, observations, actions, rewards, dones, _ = \
+                        steps, observations, goals, actions, rewards, dones, _ = \
                             self._sampler.sample(self._batch_size)
                         timeit.stop('batch')
                         timeit.start('train')
-                        self._policy.train_step(step, steps=steps, observations=observations,
+                        self._policy.train_step(step, steps=steps, observations=observations, goals=goals,
                                                 actions=actions, rewards=rewards, dones=dones,
                                                 use_target=target_updated)
                         timeit.stop('train')
@@ -295,11 +301,14 @@ class GCG(object):
 
         self._save(save_itr, self._sampler.get_recent_paths(), eval_rollouts)
 
-def run_gcg(params):
+def run_gcg(params, is_continue):
     curr_dir = os.path.dirname(__file__)
     data_dir = os.path.join(curr_dir[:curr_dir.find('src/gcg')], 'data')
     assert (os.path.exists(data_dir))
     save_dir = os.path.join(data_dir, params['exp_name'])
+    if os.path.exists(save_dir) and not is_continue:
+        print('Save directory {0} exists. You need to explicitly say to continue if you want to start training from where you left off'.format(save_dir))
+        sys.exit(0)
     os.makedirs(save_dir, exist_ok=True)
     load_dir = os.path.join(data_dir, params.get('load_policy', params['exp_name']))
     assert (os.path.exists(load_dir))
@@ -310,17 +319,17 @@ def run_gcg(params):
     # TODO: set seed
 
     # copy yaml for posterity
-    yaml_path = os.path.join(save_dir, 'params.yaml'.format(params['exp_name']))
+    yaml_path = os.path.join(save_dir, 'params.yaml')
     with open(yaml_path, 'w') as f:
         f.write(params['txt'])
 
     os.environ["CUDA_VISIBLE_DEVICES"] = str(params['policy']['gpu_device'])  # TODO: hack so don't double GPU
 
-    env_str = params['alg'].pop('env')
-    env = create_env(env_str, seed=params['seed'])
+    env_dict = params['alg'].pop('env')
+    env = create_env(env_dict, seed=params['seed'])
 
-    env_eval_str = params['alg'].pop('env_eval', env_str)
-    env_eval = create_env(env_eval_str, seed=params['seed'])
+    env_eval_dict = params['alg'].pop('env_eval', env_dict)
+    env_eval = create_env(env_eval_dict, seed=params['seed'])
 
     env.reset()
     env_eval.reset()
@@ -355,7 +364,7 @@ def run_gcg(params):
         env_eval=env_eval,
         policy=policy,
         max_path_length=max_path_length,
-        env_str=env_str,
+        env_dict=env_dict,
         **params['alg']
     )
     algo.train()
