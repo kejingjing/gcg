@@ -83,8 +83,8 @@ class Network:
 
         # logZ = tf.log(tf.distributions.Normal(loc=m, scale=tf.sqrt(v_final)).cdf())
         # logZ = 0.5*tf.log(v) + tf.log(tf.contrib.distributions.MultivariateNormalDiag.cdf(m / tf.sqrt(v_final)))
-        logZ = 0.5*tf.log(v) + tf.log(Network_layer.n_cdf(m / tf.sqrt(v_final)))
-        logZ = y * logZ + (1 - y) + (1 - logZ)
+        logZ = tf.log(Network_layer.n_cdf(m / tf.sqrt(v_final)))
+        logZ = y * tf.exp(logZ) + (1 - y) + (1 - tf.exp(logZ))  # TODO! z, not Zhat!
         logZ1 = -0.5 * (tf.log(v_final1) + (y - m)**2 / v_final1)
         logZ2 = -0.5 * (tf.log(v_final2) + (y - m)**2 / v_final2)
 
