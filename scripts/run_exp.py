@@ -14,9 +14,8 @@ for exp in args.exps:
     print(yaml_path)
     assert(os.path.exists(yaml_path))
     with open(yaml_path, 'r') as f:
-        params = yaml.load(f)
+    	params = yaml.load(f)
     with open(yaml_path, 'r') as f:
         params_txt = ''.join(f.readlines())
     params['txt'] = params_txt
-
     run_gcg(params, getattr(args, 'continue'))

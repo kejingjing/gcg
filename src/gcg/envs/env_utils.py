@@ -16,6 +16,12 @@ try:
 except:
     print('Not importing rw_rccar')
 
+try:
+    from gcg.envs.crazyflie.crazyflie_env import CrazyflieEnv
+except:
+    print('Not importing crazyflie')
+
+
 def create_env(env_dict, seed=None):
     EnvClass = eval(env_dict['class'])
     env = EnvClass(params=env_dict['params'])
