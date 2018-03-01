@@ -151,7 +151,7 @@ class CrazyflieEnv:
         self._ros_topics_and_types = dict([
             ('cf/0/image', sensor_msgs.msg.CompressedImage),
             ('cf/0/data', crazyflie.msg.CFData),
-            ('cf/0/collision', std_msgs.msg.Bool),
+            ('cf/0/coll', std_msgs.msg.Bool),
 
             # ('mode', std_msgs.msg.Int32),
             # ('steer', std_msgs.msg.Float32),
@@ -402,7 +402,7 @@ class CrazyflieEnv:
         topic = args[0]
 
 
-        if 'collision' in topic:
+        if 'coll' in topic:
             if msg.data == 1:
                 self._is_collision = True
 
@@ -443,7 +443,7 @@ class CrazyflieEnv:
         # logger.debug(str(self._ros_msg_times))
 
         for topic in self._ros_topics_and_types.keys():
-            if 'cmd' not in topic and 'collision' not in topic:
+            if 'cmd' not in topic and 'coll' not in topic:
                 if topic not in self._ros_msg_times:
                     if print:
                         logger.debug('Topic {0} has never been received'.format(topic))
@@ -460,10 +460,12 @@ class CrazyflieEnv:
         #         logger.debug('In mode {0}'.format(self._ros_msgs.get('mode')))
         #     return False
 
-        if 'cf/0/collision' in self._ros_msgs and self._ros_msgs['cf/0/collision'].data:
-            if print:
-                logger.warn('Crazyflie has crashed! Flip it if it\'s not already upright')
-            self._is_collision = False # otherwise will stay flipped forever
-            return False
+        # if 'cf/0/coll' in self._ros_msgs and self._ros_msgs['cf/0/coll'].data:
+        #     if print:
+        #         logger.warn('Crazyflie has crashed! Flip it if it\'s not already upright')
+        #     self._is_collision = False # otherwise will stay flipped forever
+        #     return False
+
+        #TODO: Flip logic to trash experiment when crazyflie is overturn
         
         return True
