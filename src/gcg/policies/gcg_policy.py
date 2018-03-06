@@ -455,7 +455,7 @@ class GCGPolicy(object):
             
         return tf_actions_explore
 
-    def _graph_cost(self, values, yhats, bhats, tf_obs_vec_target_ph, tf_rewards_ph, tf_dones_ph, target_inputs, target_values, target_yhats, target_bhats, N=None):      
+    def _graph_cost(self, values, yhats, bhats, goals, tf_obs_vec_target_ph, tf_rewards_ph, tf_dones_ph, target_inputs, target_values, target_yhats, target_bhats, N=None):      
 
         """
         :param tf_rewards_ph: [None, self._N]
@@ -511,7 +511,7 @@ class GCGPolicy(object):
             
             if output['use_bhat']:
                 bhat = bhats[output['name']]
-                bhat_label = self._graph_calculate_bhat_label(output['bhat_label'], target_inputs, target_yhats, target_bhats, target_values, rewards)
+                bhat_label = self._graph_calculate_bhat_label(output['bhat_label'], target_inputs, target_yhats, target_bhats, target_values, goals, rewards)
 #                bhat_label = eval(output['bhat_label'])
                 bhat_loss = output['bhat_loss']
                 bhat_scale = output.get('bhat_scale', 1.0)
@@ -554,7 +554,7 @@ class GCGPolicy(object):
         cost = tf.reduce_sum(cost * mask)
         return cost, control_dependencies
 
-    def _graph_calculate_bhat_label(self, bhat_label_str, target_inputs, target_yhats, target_bhats, target_values, rewards):
+    def _graph_calculate_bhat_label(self, bhat_label_str, target_inputs, target_yhats, target_bhats, target_values, goals, rewards):
         gammas = tf.pow(self._gamma, tf.range(self._H + 1, dtype=tf.float32))
         outputs_val = []
         for h in range(self._H):
@@ -725,7 +725,7 @@ class GCGPolicy(object):
                 target_values, target_yhats, target_bhats, tf_target_vars, tf_update_target_fn = self._graph_setup_target(policy_scope, tf_obs_im_target_ph, tf_obs_vec_target_ph, target_inputs, goals, tf_policy_vars)
                 
                 ### optimization
-                tf_cost, tf_mse, tf_costs = self._graph_cost(values, yhats, bhats, tf_obs_vec_target_ph, tf_rewards_ph, tf_dones_ph, target_inputs, target_values, target_yhats, target_bhats) 
+                tf_cost, tf_mse, tf_costs = self._graph_cost(values, yhats, bhats, goals, tf_obs_vec_target_ph, tf_rewards_ph, tf_dones_ph, target_inputs, target_values, target_yhats, target_bhats) 
                 tf_opt, tf_lr_ph = self._graph_optimize(tf_cost, tf_trainable_policy_vars)
             else:
                 tf_costs = []
