@@ -19,7 +19,8 @@ class GCGPolicy(object):
     def __init__(self, **kwargs):
         self._outputs = kwargs['outputs'] 
         self._rew_fn = kwargs['rew_fn']
-        
+        self._goal_in_obs = kwargs['goal_in_obs']
+
         ### environment
         self._env_spec = kwargs['env_spec']
         self._obs_vec_keys = list(self._env_spec.observation_vec_spec.keys())
@@ -158,6 +159,7 @@ class GCGPolicy(object):
             ### target inputs
             tf_obs_im_target_ph = tf.placeholder(tf.uint8, [None, self._N + self._obs_history_len - 0, self._obs_im_dim], name='tf_obs_im_target_ph')
             tf_obs_vec_target_ph = tf.placeholder(tf.float32, [None, self._N + self._obs_history_len - 0, self._obs_vec_dim], name='tf_obs_vec_target_ph')
+            tf_goals_target_ph = tf.placeholder(tf.float32, [None, self._N + 1, self._goal_dim], name='tf_goals_target_ph')
             ### policy exploration
             tf_test_es_ph_dict = defaultdict(None)
             if self._gaussian_es:
@@ -168,9 +170,9 @@ class GCGPolicy(object):
             tf_episode_timesteps_ph = tf.placeholder(tf.int32, [None], name='tf_episode_timesteps')
 
         return tf_obs_im_ph, tf_obs_vec_ph, tf_actions_ph, tf_dones_ph, tf_goals_ph, tf_rewards_ph,\
-               tf_obs_im_target_ph, tf_obs_vec_target_ph, tf_test_es_ph_dict, tf_episode_timesteps_ph
+               tf_obs_im_target_ph, tf_obs_vec_target_ph, tf_goals_target_ph, tf_test_es_ph_dict, tf_episode_timesteps_ph
 
-    def _graph_obs_to_lowd(self, tf_obs_im_ph, tf_obs_vec_ph, is_training):
+    def _graph_obs_to_lowd(self, tf_obs_im_ph, tf_obs_vec_ph, tf_goals_ph, is_training):
         with tf.name_scope('obs_to_lowd'):
             ### whiten observations
             # TODO: assumes image is an input
@@ -198,8 +200,13 @@ class GCGPolicy(object):
             ### FCNN
 
             with tf.variable_scope(self._observation_scope):
+                concat_list = [layer]
                 if tf_obs_vec_ph.get_shape()[1].value > 0:
-                    layer = tf.concat([layer, tf.reshape(tf_obs_vec_ph, [-1, self._obs_history_len * self._obs_vec_dim])], axis=1)
+                    concat_list.append(tf.reshape(tf_obs_vec_ph, [-1, self._obs_history_len * self._obs_vec_dim]))
+                if self._goal_in_obs:
+                    concat_list.append(tf_goals_ph)
+                if len(concat_list) > 1:
+                    layer = tf.concat(concat_list, axis=1)
 
                 self._observation_graph.update({'batch_size': tf.shape(layer)[0]})
                 tf_obs_lowd = networks.fcnn(layer, self._observation_graph, is_training=is_training, global_step_tensor=self.global_step)
@@ -304,7 +311,7 @@ class GCGPolicy(object):
 
         return tf_actions
 
-    def _graph_get_action(self, tf_obs_im_ph, tf_obs_vec_ph, inputs, goals, get_action_params, scope_select, reuse_select,
+    def _graph_get_action(self, tf_obs_im_ph, tf_obs_vec_ph, tf_goals_ph, inputs, goals, get_action_params, scope_select, reuse_select,
                           scope_eval, reuse_eval, tf_episode_timesteps_ph):
         """
         :param tf_obs_im_ph: [batch_size, obs_history_len, obs_im_dim]
@@ -346,10 +353,10 @@ class GCGPolicy(object):
 
         ### process to lowd
         with tf.variable_scope(scope_select, reuse=reuse_select):
-            tf_obs_lowd_select = self._graph_obs_to_lowd(tf_obs_im_ph, tf_obs_vec_ph,
+            tf_obs_lowd_select = self._graph_obs_to_lowd(tf_obs_im_ph, tf_obs_vec_ph, tf_goals_ph,
                                                          is_training=False)
         with tf.variable_scope(scope_eval, reuse=reuse_eval):
-            tf_obs_lowd_eval = self._graph_obs_to_lowd(tf_obs_im_ph, tf_obs_vec_ph,
+            tf_obs_lowd_eval = self._graph_obs_to_lowd(tf_obs_im_ph, tf_obs_vec_ph, tf_goals_ph,
                                                        is_training=False)
         ### tile
         tf_actions = tf.tile(tf_actions, (num_obs, 1, 1))
@@ -368,8 +375,8 @@ class GCGPolicy(object):
         for i, key in enumerate(self._action_keys):
             actions[key] = tf_actions[:, :, i]
         
-        tf_values_select = self._get_action_value(actions, values_all_select, yhats_all_select, bhats_all_select, goals)
-        tf_values_eval = self._get_action_value(actions, values_all_eval, yhats_all_eval, bhats_all_eval, goals)
+        tf_values_select = self._get_action_value(actions, values_all_select, yhats_all_select, bhats_all_select, inputs, goals)
+        tf_values_eval = self._get_action_value(actions, values_all_eval, yhats_all_eval, bhats_all_eval, inputs, goals)
        
         ### get_action based on select (policy)
         tf_values_select = tf.reshape(tf_values_select, (num_obs, K))  # [num_obs, K]
@@ -413,7 +420,7 @@ class GCGPolicy(object):
 
         return tf_get_action, tf_get_action_value, action_values, action_yhats, action_bhats, tf_get_action_reset_ops
 
-    def _get_action_value(self, actions, values, yhats, bhats, goals):
+    def _get_action_value(self, actions, values, yhats, bhats, inputs, goals):
         # can use actions, values, yhats, bhats, goals 
         rew = eval(self._rew_fn)
 
@@ -547,8 +554,9 @@ class GCGPolicy(object):
             control_dependencies += [tf.assert_greater_equal(tf_train_values, 0., name='cost_assert_4')]
             control_dependencies += [tf.assert_less_equal(tf_train_values, 1., name='cost_assert_5')]
             cost = tf_utils.xentropy(tf_train_values, tf_labels)
-        elif loss == 'sin_2':
-            cost = tf.square(tf.sin(tf_train_values - tf_labels))
+        # TODO
+#        elif loss == 'sin_2':
+#            cost = tf.square(tf.sin(tf_train_values - tf_labels))
         else:
             raise NotImplementedError
         cost = tf.reduce_sum(cost * mask)
@@ -581,11 +589,11 @@ class GCGPolicy(object):
     def _graph_init_vars(self, tf_sess):
         tf_sess.run([tf.global_variables_initializer()])
 
-    def _graph_setup_policy(self, policy_scope, inputs, goals, tf_obs_im_ph, tf_obs_vec_ph, tf_actions_ph):
+    def _graph_setup_policy(self, policy_scope, inputs, goals, tf_obs_im_ph, tf_obs_vec_ph, tf_goals_ph, tf_actions_ph):
         ### policy
         with tf.variable_scope(policy_scope):
             ### process obs to lowd
-            tf_obs_lowd = self._graph_obs_to_lowd(tf_obs_im_ph, tf_obs_vec_ph, is_training=True)
+            tf_obs_lowd = self._graph_obs_to_lowd(tf_obs_im_ph, tf_obs_vec_ph, tf_goals_ph, is_training=True)
             ### create training policy
             values, yhats, bhats = \
                 self._graph_inference(tf_obs_lowd, inputs, goals, tf_actions_ph[:, :self._H, :],
@@ -593,11 +601,11 @@ class GCGPolicy(object):
 
         return values, yhats, bhats
 
-    def _graph_setup_action_selection(self, policy_scope, tf_obs_im_ph, tf_obs_vec_ph, inputs, goals,
+    def _graph_setup_action_selection(self, policy_scope, tf_obs_im_ph, tf_obs_vec_ph, tf_goals_ph, inputs, goals,
                                       tf_episode_timesteps_ph, tf_test_es_ph_dict):
         ### action selection
         tf_get_action, tf_get_action_value, _, _, _, tf_get_action_reset_ops = \
-            self._graph_get_action(tf_obs_im_ph, tf_obs_vec_ph, inputs, goals, self._get_action_test,
+            self._graph_get_action(tf_obs_im_ph, tf_obs_vec_ph, tf_goals_ph, inputs, goals, self._get_action_test,
                                    policy_scope, True, policy_scope, True,
                                    tf_episode_timesteps_ph)
         
@@ -606,7 +614,7 @@ class GCGPolicy(object):
 
         return tf_get_action, tf_get_action_value, tf_get_action_reset_ops, tf_get_action_explore
 
-    def _graph_setup_target(self, policy_scope, tf_obs_im_target_ph, tf_obs_vec_target_ph,
+    def _graph_setup_target(self, policy_scope, tf_obs_im_target_ph, tf_obs_vec_target_ph, tf_goals_target_ph,
                             target_inputs, goals, tf_policy_vars):
         ### create target network
         if self._use_target:
@@ -620,8 +628,9 @@ class GCGPolicy(object):
                                                      for h in range(self._obs_history_len + 1,
                                                                     self._obs_history_len + self._N + 1)],
                                                     0)
-            
-            _, _, pre_target_values, pre_target_yhats, pre_target_bhats, _ = self._graph_get_action(tf_obs_im_target_ph_packed, tf_obs_vec_target_ph_packed, target_inputs, goals, self._get_action_target, scope_select=policy_scope, reuse_select=True,
+            tf_goals_target_ph_packed = tf.concat([tf_goals_target_ph[:, h, :] for h in range(1, 1 + self._N)], axis=0)
+
+            _, _, pre_target_values, pre_target_yhats, pre_target_bhats, _ = self._graph_get_action(tf_obs_im_target_ph_packed, tf_obs_vec_target_ph_packed, tf_goals_target_ph_packed, target_inputs, goals, self._get_action_target, scope_select=policy_scope, reuse_select=True,
                           scope_eval=target_scope, reuse_eval=(target_scope == policy_scope), tf_episode_timesteps_ph=None) # TODO would need to fill in
 
             # TODO maybe make self._N + 1
@@ -688,7 +697,7 @@ class GCGPolicy(object):
         with tf_sess.as_default(), tf_graph.as_default():
             ### create input output placeholders
             tf_obs_im_ph, tf_obs_vec_ph, tf_actions_ph, tf_dones_ph, tf_goals_ph, tf_rewards_ph,\
-            tf_obs_im_target_ph, tf_obs_vec_target_ph, tf_test_es_ph_dict, tf_episode_timesteps_ph = \
+            tf_obs_im_target_ph, tf_obs_vec_target_ph, tf_goals_target_ph, tf_test_es_ph_dict, tf_episode_timesteps_ph = \
                 self._graph_input_output_placeholders()
             self.global_step = tf.Variable(0, trainable=False, name='global_step')
 
@@ -703,11 +712,11 @@ class GCGPolicy(object):
 
             ### setup policy
             policy_scope = 'policy'
-            values, yhats, bhats = self._graph_setup_policy(policy_scope, inputs, goals, tf_obs_im_ph, tf_obs_vec_ph, tf_actions_ph)
+            values, yhats, bhats = self._graph_setup_policy(policy_scope, inputs, goals, tf_obs_im_ph, tf_obs_vec_ph, tf_goals_ph, tf_actions_ph)
 
             ### get action
             tf_get_action, tf_get_action_value, tf_get_action_reset_ops, tf_get_action_explore = \
-                self._graph_setup_action_selection(policy_scope, tf_obs_im_ph, tf_obs_vec_ph, inputs, goals, tf_episode_timesteps_ph, tf_test_es_ph_dict)
+                self._graph_setup_action_selection(policy_scope, tf_obs_im_ph, tf_obs_vec_ph, tf_goals_ph, inputs, goals, tf_episode_timesteps_ph, tf_test_es_ph_dict)
 
             ### get policy variables
             tf_policy_vars = sorted(tf.get_collection(tf.GraphKeys.GLOBAL_VARIABLES, scope=policy_scope),
@@ -722,7 +731,7 @@ class GCGPolicy(object):
                     target_inputs[key] = tf_obs_vec_target_ph[:, -self._H:, i]
                 
                 ### setup target
-                target_values, target_yhats, target_bhats, tf_target_vars, tf_update_target_fn = self._graph_setup_target(policy_scope, tf_obs_im_target_ph, tf_obs_vec_target_ph, target_inputs, goals, tf_policy_vars)
+                target_values, target_yhats, target_bhats, tf_target_vars, tf_update_target_fn = self._graph_setup_target(policy_scope, tf_obs_im_target_ph, tf_obs_vec_target_ph, tf_goals_target_ph, target_inputs, goals, tf_policy_vars)
                 
                 ### optimization
                 tf_cost, tf_mse, tf_costs = self._graph_cost(values, yhats, bhats, tf_obs_vec_target_ph, tf_rewards_ph, tf_dones_ph, target_inputs, target_values, target_yhats, target_bhats) 
@@ -750,6 +759,7 @@ class GCGPolicy(object):
             'rewards_ph': tf_rewards_ph,
             'obs_im_target_ph': tf_obs_im_target_ph,
             'obs_vec_target_ph': tf_obs_vec_target_ph,
+            'goals_target_ph': tf_goals_target_ph,
             'test_es_ph_dict': tf_test_es_ph_dict,
             'episode_timesteps_ph': tf_episode_timesteps_ph,
             'yhats': yhats,
@@ -782,6 +792,7 @@ class GCGPolicy(object):
         :param steps: [batch_size, N+1]
         :param observations_im: [batch_size, N+1 + obs_history_len-1, obs_im_dim]
         :param observations_vec: [batch_size, N+1 + obs_history_len-1, obs_vec_dim]
+        :param goals: [batch_size, N+1, goal_dim]
         :param actions: [batch_size, N+1, action_dim]
         :param rewards: [batch_size, N+1]
         :param dones: [batch_size, N+1]
@@ -795,11 +806,13 @@ class GCGPolicy(object):
             self._tf_dict['obs_vec_ph']: observations_vec[:, :self._obs_history_len, :],
             self._tf_dict['actions_ph']: actions,
             self._tf_dict['dones_ph']: dones[:, :self._N],
+            self._tf_dict['goals_ph']: goals[:, 0], # TODO 
             self._tf_dict['rewards_ph']: rewards[:, :self._N],
             self._tf_dict['obs_vec_target_ph']: observations_vec
         }
         if self._use_target:
             feed_dict[self._tf_dict['obs_im_target_ph']] = observations_im
+            feed_dict[self._tf_dict['goals_target_ph']] = goals
 
         cost, mse, costs, _ = self._tf_dict['sess'].run([self._tf_dict['cost'],
                                                         self._tf_dict['mse'],
