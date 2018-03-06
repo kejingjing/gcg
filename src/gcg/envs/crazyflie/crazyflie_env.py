@@ -10,7 +10,7 @@ from gcg.envs.spaces.box import Box
 from gcg.envs.spaces.discrete import Discrete
 from gcg.data.logger import logger
 
-
+import time
 
 try:
     import rospy
@@ -261,6 +261,7 @@ class CrazyflieEnv:
 
         vec = np.array([coll, data.alt, data.v_batt, data.accel_x, data.accel_y, data.accel_z])
 
+
         return im, vec
 
     def _get_goal(self):
@@ -316,6 +317,8 @@ class CrazyflieEnv:
 
 
     def step(self, action, offline=False):
+
+
         if not offline:
             assert (self.ros_is_good())
 
@@ -330,6 +333,7 @@ class CrazyflieEnv:
         self._set_motion(vx, vy, yaw, dz)
 
         if not offline:
+            # print("online", self._dt, (rospy.Time.now() - self._last_step_time).to_sec())
             rospy.sleep(max(0., self._dt - (rospy.Time.now() - self._last_step_time).to_sec()))
             self._last_step_time = rospy.Time.now()
 

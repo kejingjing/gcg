@@ -3,6 +3,7 @@ import threading
 
 from gcg.envs.env_utils import create_env
 from gcg.policies.gcg_policy import GCGPolicy
+from gcg.policies.crazyflie_teleop_policy import CrazyflieTeleopPolicy
 from gcg.data.timer import timeit
 from gcg.data.logger import logger
 from gcg.data import mypickle

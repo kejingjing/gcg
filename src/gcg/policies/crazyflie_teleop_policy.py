@@ -46,25 +46,28 @@ class CrazyflieTeleopPolicy(object):
     def __init__(self, **kwargs):
 
         #used to get joystick input
-        rospy.init_node("CrazyflieTeleopPolicy", anonymous=True)
+        # rospy.init_node("CrazyflieTeleopPolicy", anonymous=True)
 
-        self._outputs = kwargs['outputs'] 
+        # self._outputs = kwargs['outputs'] 
         self._joy_topic = kwargs['joy_topic']
 
         self.curr_joy = None
         self.cmd = -1 # -1 : NONE
 
-        self.is_flow_motion = flow_motion
+        self.is_flow_motion = bool(kwargs['flow_motion'])
 
         rospy.Subscriber(self._joy_topic, Joy, self.joy_cb)
         # self._rew_fn = kwargs['rew_fn']
+
+        self._N = kwargs['N']
+        self._gamma = kwargs['gamma']
         
         ### environment
         self._env_spec = kwargs['env_spec']
         self._obs_vec_keys = list(self._env_spec.observation_vec_spec.keys())
         self._action_keys = list(self._env_spec.action_spec.keys())
         self._goal_keys = list(self._env_spec.goal_spec.keys())
-        self._output_keys = sorted([output['name'] for output in self._outputs])
+        # self._output_keys = sorted([output['name'] for output in self._outputs])
         self._obs_im_shape = self._env_spec.observation_im_space.shape
 
         
@@ -72,62 +75,8 @@ class CrazyflieTeleopPolicy(object):
         self._obs_vec_dim = len(self._obs_vec_keys)
         self._action_dim = len(self._action_keys)
         self._goal_dim = len(self._goal_keys)
-        self._output_dim = len(self._output_keys)
+        # self._output_dim = len(self._output_keys)
         
-        # ### model horizons
-        # self._N = kwargs['N'] # number of returns to use (N-step)
-        # self._H = kwargs['H'] # action planning horizon for training
-        # self._gamma = kwargs['gamma'] # reward decay
-        # self._obs_history_len = kwargs['obs_history_len'] # how many previous observations to use
-
-        # ### model architecture
-        # self._inference_only = kwargs.get('inference_only', False)
-        # self._image_graph = kwargs['image_graph']
-        # self._observation_graph = kwargs['observation_graph']
-        # self._action_graph = kwargs['action_graph']
-        # self._rnn_graph = kwargs['rnn_graph']
-        # self._output_graph = kwargs['output_graph']
-        # ### scopes
-        # self._image_scope = 'image_scope'
-        # self._observation_scope = 'observation_scope'
-        # self._action_scope = 'action_scope'
-        # self._rnn_scope = 'rnn_scope'
-        # self._output_scope = 'output_scope'
-
-        # ### target network
-        # self._use_target = kwargs['use_target']
-        # self._separate_target_params = kwargs['separate_target_params']
-        # ### training
-        # self._only_completed_episodes = kwargs['only_completed_episodes']
-        # self._weight_decay = kwargs['weight_decay']
-        # self._lr_schedule = schedules.PiecewiseSchedule(**kwargs['lr_schedule'])
-        # self._grad_clip_norm = kwargs['grad_clip_norm']
-        # self._gpu_device = kwargs['gpu_device']
-        # self._gpu_frac = kwargs['gpu_frac']
-
-        # ### action selection and exploration
-        # self._get_action_test = kwargs['get_action_test']
-        # self._get_action_target = kwargs['get_action_target']
-        # assert(self._get_action_target['type'] == 'random')
-        # gaussian_es_params = kwargs['exploration_strategies'].get('GaussianStrategy', None)
-        # if gaussian_es_params is not None:
-        #     self._gaussian_es = GaussianStrategy(self._env_spec, **gaussian_es_params) if gaussian_es_params else None
-        # else:
-        #     self._gaussian_es = None
-        # epsilon_greedy_es_params = kwargs['exploration_strategies'].get('EpsilonGreedyStrategy', None)
-        # if epsilon_greedy_es_params is not None:
-        #     self._epsilon_greedy_es = EpsilonGreedyStrategy(self._env_spec, **epsilon_greedy_es_params)
-        # else:
-        #     self._epsilon_greedy_es = None
-
-        # ### setup the model
-        # self._tf_debug = dict()
-        # self._tf_dict = self._graph_setup()
-
-        # ### logging
-        # self._log_stats = defaultdict(list)
-
-        # assert(self._N >= self._H)
 
     #################
     ### Callbacks ###
@@ -138,79 +87,53 @@ class CrazyflieTeleopPolicy(object):
             new_axes[i] = signal.axes[i] if abs(signal.axes[i]) > TOLERANCE else 0
         signal.axes = new_axes
 
-    def joy_cb(msg):
-        if self.curr_joy:
-            if msg.buttons[ESTOP_CHANNEL] and not self.curr_joy.buttons[ESTOP_CHANNEL]:
-                #takeoff
-                self.cmd = CFCommand.ESTOP
-                print("CALLING ESTOP")
-            elif msg.buttons[TAKEOFF_CHANNEL] and not self.curr_joy.buttons[TAKEOFF_CHANNEL]:
-                #takeoff
-                self.cmd = CFCommand.TAKEOFF
-                print("CALLING TAKEOFF")
-            elif msg.buttons[LAND_CHANNEL] and not self.curr_joy.buttons[LAND_CHANNEL]:
-                #takeoff
-                self.cmd = CFCommand.LAND
-                print("CALLING LAND")
-        else:
-            if msg.buttons[ESTOP_CHANNEL] :
-                #takeoff
-                self.cmd = CFCommand.ESTOP
-                print("CALLING ESTOP")
-            elif msg.buttons[TAKEOFF_CHANNEL] :
-                #takeoff
-                self.cmd = CFCommand.TAKEOFF
-                print("CALLING TAKEOFF")
-            elif msg.buttons[LAND_CHANNEL] :
-                #takeoff
-                self.cmd = CFCommand.LAND
-                print("CALLING LAND")
-            '''
-
-        if self.curr_joy:
-            if msg.buttons[ESTOP_CHANNEL] and not self.curr_joy.buttons[ESTOP_CHANNEL]:
-                #takeoff
-                self.cmd = CFCommand.ESTOP
-            elif msg.axes[2] and not self.curr_joy.axes[2]:
-                #takeoff
-                self.cmd = CFCommand.TAKEOFF
-            elif msg.axes[5] and not self.curr_joy.axes[5]:
-                #takeoff
-                self.cmd = CFCommand.LAND'''
+    def joy_cb(self, msg):
+        # if self.curr_joy:
+        #     if msg.buttons[ESTOP_CHANNEL] and not self.curr_joy.buttons[ESTOP_CHANNEL]:
+        #         #takeoff
+        #         self.cmd = CFCommand.ESTOP
+        #         print("CALLING ESTOP")
+        #     elif msg.buttons[TAKEOFF_CHANNEL] and not self.curr_joy.buttons[TAKEOFF_CHANNEL]:
+        #         #takeoff
+        #         self.cmd = CFCommand.TAKEOFF
+        #         print("CALLING TAKEOFF")
+        #     elif msg.buttons[LAND_CHANNEL] and not self.curr_joy.buttons[LAND_CHANNEL]:
+        #         #takeoff
+        #         self.cmd = CFCommand.LAND
+        #         print("CALLING LAND")
+        # else:
+        #     if msg.buttons[ESTOP_CHANNEL] :
+        #         #takeoff
+        #         self.cmd = CFCommand.ESTOP
+        #         print("CALLING ESTOP")
+        #     elif msg.buttons[TAKEOFF_CHANNEL] :
+        #         #takeoff
+        #         self.cmd = CFCommand.TAKEOFF
+        #         print("CALLING TAKEOFF")
+        #     elif msg.buttons[LAND_CHANNEL] :
+        #         #takeoff
+        #         self.cmd = CFCommand.LAND
+        #         print("CALLING LAND")
         self.dead_band(msg)
         self.curr_joy = msg
 
     ##################
     ### Properties ###
     ##################
+    @property
+    def N(self):
+        return self._N
+
+    @property
+    def gamma(self):
+        return self._gamma
 
     @property
     def obs_history_len(self):
-        return self._obs_history_len
-
+        return 1
     ################
     ### Training ###
     ################
-
-    def update_target(self):
-        return
-
-    def train_step(self, step, steps, observations, goals, actions, rewards, dones, use_target):
-        """
-        :param steps: [batch_size, N+1]
-        :param observations_im: [batch_size, N+1 + obs_history_len-1, obs_im_dim]
-        :param observations_vec: [batch_size, N+1 + obs_history_len-1, obs_vec_dim]
-        :param actions: [batch_size, N+1, action_dim]
-        :param rewards: [batch_size, N+1]
-        :param dones: [batch_size, N+1]
-        """
-        return
-
-    def reset_weights(self):
-        tf_sess = self._tf_dict['sess']
-        tf_graph = tf_sess.graph
-        with tf_sess.as_default(), tf_graph.as_default():
-            self._graph_init_vars(tf_sess)
 
     ######################
     ### Policy methods ###
@@ -221,23 +144,24 @@ class CrazyflieTeleopPolicy(object):
         #                                                               [goal], explore=explore)
         # return chosen_actions[0], chosen_values[0], action_infos[0]
 
-        if self.cmd != -1:
-            motion = CFCommand()
-            if self.cmd == CFCommand.ESTOP:
-                motion.cmd = CFCommand.ESTOP
+        motion = CFMotion()
 
-            elif self.cmd == CFCommand.TAKEOFF:
-                motion.cmd = CFCommand.TAKEOFF
+        # if self.cmd != -1:
+        #     motion = CFCommand()
+        #     if self.cmd == CFCommand.ESTOP:
+        #         motion.cmd = CFCommand.ESTOP
 
-            elif self.cmd == CFCommand.LAND:
-                motion.cmd = CFCommand.LAND
+        #     elif self.cmd == CFCommand.TAKEOFF:
+        #         motion.cmd = CFCommand.TAKEOFF
 
-            #reset
-            self.cmd = -1
+        #     elif self.cmd == CFCommand.LAND:
+        #         motion.cmd = CFCommand.LAND
+
+        #     #reset
+        #     self.cmd = -1
 
         #repeat send at 10Hz
-        elif self.curr_joy:
-            motion = CFMotion()
+        if self.curr_joy:
 
             motion.is_flow_motion = self.is_flow_motion
                 # computing regular vx, vy, yaw, alt motion
@@ -265,13 +189,23 @@ class CrazyflieTeleopPolicy(object):
                 # motion.yaw = self.curr_joy.axes[6] * 0.1
             
         # return motion
+        return [ motion.x, motion.y, motion.yaw, motion.dz ]
 
+    def get_actions(self, steps, current_episode_steps, observations, goals, explore):
+        ds = [{} for _ in steps]
+        observations_im, observations_vec = observations
+        
+        values = [0 for _ in steps]
+        joy_action = self.get_action(None, None, None, None, None) #args don't matter
+        actions = [joy_action] * len(steps)
 
+        return actions, values, ds
     
     def reset_get_action(self):
         return
 
     def terminate(self):
+        self.curr_joy = None
         return
 
     #####################

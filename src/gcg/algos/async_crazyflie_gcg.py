@@ -32,10 +32,14 @@ class AsyncCrazyflieGCG(AsyncGCG):
 
     def _inference_step(self, inference_step):
         try:
+            # st = time.time()
             self._sampler.step(inference_step,
                                take_random_actions=(inference_step <= self._onpolicy_after_n_steps),
                                explore=True)
             inference_step += self._sampler.n_envs
+
+            # elapsed_t = time.time() - st
+            # print("Elapsed in inference:", elapsed_t)
         except Exception as e:
             logger.warn('Sampler exception {0}'.format(str(e)))
             trashed_steps = self._sampler.trash_current_rollouts()
