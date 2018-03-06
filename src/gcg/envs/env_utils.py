@@ -16,6 +16,11 @@ try:
 except:
     print('Not importing rw_rccar')
 
+try:
+    from gcg.envs.carla.carla_env import CarlaEnv
+except:
+    print('Not importing carla')
+
 def create_env(env_dict, seed=None):
     EnvClass = eval(env_dict['class'])
     env = EnvClass(params=env_dict['params'])

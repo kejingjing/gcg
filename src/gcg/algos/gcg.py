@@ -327,12 +327,14 @@ def run_gcg(params, is_continue):
 
     env_dict = params['alg'].pop('env')
     env = create_env(env_dict, seed=params['seed'])
+    env.reset()
 
     env_eval_dict = params['alg'].pop('env_eval', env_dict)
-    env_eval = create_env(env_eval_dict, seed=params['seed'])
-
-    env.reset()
-    env_eval.reset()
+    if env_eval_dict is not None:
+        env_eval = create_env(env_eval_dict, seed=params['seed'])
+        env_eval.reset()
+    else:
+        env_eval = None
 
     #####################
     ### Create policy ###
