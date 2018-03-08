@@ -26,7 +26,8 @@ except:
     ROS_IMPORTED = False
 
 #print(ROS_IMPORTED)
-print("hi this is running")
+print("Running Crazyflie Environment")
+
 class RolloutRosbag:
     def __init__(self):
         self._rosbag = None
@@ -104,6 +105,12 @@ class CrazyflieEnv:
         # params.setdefault('backup_steer_range', (-0.8, 0.8))
         params.setdefault('press_enter_on_reset', False)
 
+        params.setdefault('use_joy_commands', True)
+        params.setdefault('joy_start_btn', 1) #A
+        params.setdefault('joy_stop_btn', 2) #B
+        params.setdefault('joy_pause_run_btn', 3) # Y
+        params.setdefault('joy_topic', '/joy')
+
         self._use_vel = True
         self._obs_shape = params['obs_shape']
         # self._steer_limits = params['steer_limits']
@@ -120,6 +127,18 @@ class CrazyflieEnv:
 
         self._dt = params['dt']
         self.horizon = params['horizon']
+
+        # start stop and pause
+        self._use_joy_commands = params['use_joy_commands']
+        self._joy_topic = params['joy_topic']
+        self._joy_stop_btn = params['joy_stop_btn']
+        self._joy_start_btn = params['joy_start_btn']
+        self._start_pressed = False
+        self._stop_pressed = False
+        self._joy_pause_run_btn = params['joy_pause_run_btn']
+        self._pause = False
+        self._curr_joy = None
+
 
         self._setup_spec()
         assert (self.observation_im_space.shape[-1] == 1 or self.observation_im_space.shape[-1] == 3)
@@ -176,8 +195,13 @@ class CrazyflieEnv:
         for topic, type in self._ros_topics_and_types.items():
             rospy.Subscriber(topic, type, self.ros_msg_update, (topic,))
         
-        self._ros_motion_pub = rospy.Publisher("/cf/0/motion", crazyflie.msg.CFMotion)
-        self._ros_command_pub = rospy.Publisher("/cf/0/command", crazyflie.msg.CFCommand)
+        self._ros_motion_pub = rospy.Publisher("/cf/0/motion", crazyflie.msg.CFMotion, queue_size=10)
+        self._ros_command_pub = rospy.Publisher("/cf/0/command", crazyflie.msg.CFCommand, queue_size=10)
+
+        # separate from big list
+        if self._use_joy_commands:
+            logger.debug("Environment using joystick commands")
+            self._ros_joy_sub = rospy.Subscriber(self._joy_topic, sensor_msgs.msg.Joy, self._joy_cb)
 
         # self._ros_vx_pub = rospy.Publisher(self._ros_namespace + 'cmd/vx', std_msgs.msg.Float32, queue_size=10)
         # self._ros_vy_pub = rospy.Publisher(self._ros_namespace + 'cmd/vy', std_msgs.msg.Float32, queue_size=10)
@@ -201,7 +225,7 @@ class CrazyflieEnv:
 
         self.action_spec['vx'] = Box(low=-1., high=1.)
         self.action_spec['vy'] = Box(low=-1, high=1)
-        self.action_spec['yaw'] = Box(low=-1, high=1)
+        self.action_spec['yaw'] = Box(low=-180, high=180)
         self.action_spec['dz'] = Box(low=-0.8, high=0.8) #meters
         self.action_space = Box(low=np.array([self.action_spec['vx'].low[0], self.action_spec['vy'].low[0], self.action_spec['yaw'].low[0], self.action_spec['dz'].low[0]]),
                                 high=np.array([self.action_spec['vx'].high[0], self.action_spec['vy'].high[0], self.action_spec['yaw'].high[0], self.action_spec['dz'].high[0]]))
@@ -278,8 +302,31 @@ class CrazyflieEnv:
             reward = 0
         return reward
 
+    ### JOYSTICK ###
+
+    def _get_joy_stop(self):
+        #in this order
+        return self._use_joy_commands and self._stop_pressed
+
+    def _get_pause(self):
+        return self._use_joy_commands and self._pause
+
+    def _get_joy_start(self):
+        #in this order
+        return self._use_joy_commands and self._start_pressed
+        self._curr_joy and self._curr_joy.buttons[self._joy_start_btn]
+
+    ### OTHER ###
+    
+    def _get_collision(self):
+        return self._is_collision 
+
     def _get_done(self):
-        return self._is_collision
+        # if self._get_joy_stop():
+        #     print("STOPPING MANUALLY")
+        #     print(self._curr_joy.buttons)
+        #     print(self._joy_stop_btn)
+        return self._get_joy_stop() or self._get_collision()
 
     '''    def _set_steer(self, steer):
         self._ros_steer_pub.publish(std_msgs.msg.Float32(steer))
@@ -316,6 +363,22 @@ class CrazyflieEnv:
         self._ros_command_pub.publish(command)
 
 
+    def _joy_cb(self, msg):
+        self._curr_joy = msg
+
+        #permanent state
+        if self._curr_joy.buttons[self._joy_start_btn]:
+            self._start_pressed = True
+
+        if self._curr_joy.buttons[self._joy_stop_btn]:
+            self._stop_pressed = True
+        #toggle
+        if self._curr_joy.buttons[self._joy_pause_run_btn]:
+            self._pause = not self._pause
+            self.info("Pause State Changed to: " + str(self._pause))
+
+
+
     def step(self, action, offline=False):
 
 
@@ -330,6 +393,7 @@ class CrazyflieEnv:
             action = np.clip(action, self.action_space.low, self.action_space.high)
 
         vx, vy, yaw, dz = action
+        # print(action)
         self._set_motion(vx, vy, yaw, dz)
 
         if not offline:
@@ -341,6 +405,13 @@ class CrazyflieEnv:
         goal = self._get_goal()
         reward = self._get_reward()
         done = self._get_done()
+
+        if done:
+            if self._get_collision():
+                logger.warn('-- COLLISION --')
+            elif self._get_joy_stop():
+                logger.warn('-- MANUALLY STOPPED --')
+
         env_info = dict()
 
         self._t += 1
@@ -354,14 +425,33 @@ class CrazyflieEnv:
 
         return next_observation, goal, reward, done, env_info
 
+
+    def reset_state(self):
+        self._last_step_time = rospy.Time.now()
+        self._is_collision = False
+        self._t = 0
+        self._done = False
+        self._curr_joy = None
+        self._start_pressed = False
+        self._stop_pressed = False
+        self._pause = False
+
     def reset(self, offline=False, keep_rosbag=False):
         if offline:
             self._is_collision = False
             return self._get_observation(), self._get_goal()
 
-        assert (self.ros_is_good())
+        assert self.ros_is_good(), "On End: ROS IS NOT GOOD"
+        #assert(not self.is_upside_down())
+
         
         self._set_command(0)
+
+        if self._get_pause():
+            logger.warn("Paused by User (Joystick input). Waiting...")
+            while not self._get_pause():
+                pass
+            logger.debug("Unpaused by User (Joystick input).")
 
         if self._ros_rolloutbag.is_open:
             if keep_rosbag:
@@ -371,30 +461,50 @@ class CrazyflieEnv:
                 logger.debug('Trashing bag')
                 self._ros_rolloutbag.trash()
 
-        if self._press_enter_on_reset:
+
+        #waiting for crash to be stable
+        rospy.sleep(1.0)
+
+        if self._press_enter_on_reset or self.is_upside_down():
             logger.info('Resetting, press enter to continue')
             input()
         else:
             if self._is_collision:
                 logger.debug('Resetting (collision)')
             else:
+                # print(self._curr_joy)
                 logger.debug('Resetting (no collision)')
 
+        
+        self.reset_state()
 
+        assert self.ros_is_good(), "On Start: ROS IS NOT GOOD"
 
-            
-        #add thing to get ENTER key to make sure crazyflie is upright
-        self._set_command(2)
+        
+        logger.debug("Waiting to takeoff ...")
+        rospy.sleep(1.0)
 
-        rospy.sleep(0.5)
-
-        self._last_step_time = rospy.Time.now()
+        # for good measure
         self._is_collision = False
-        self._t = 0
+
+        logger.debug("Taking off")
+        self._set_command(2)
+        rospy.sleep(2.0)
+
+        # must be after resetting curr_joy
+        if self._use_joy_commands:
+            logger.debug("Waiting for Start (Joystick input)...")
+            while not self._get_joy_start() and not self._get_done():
+                pass
+            if self._get_done():
+                logger.warn("* Joystick input bypassed - (likely due to collision) *")
+                # reset again
+                return self.reset(offline, keep_rosbag)
+            self._curr_joy = None
+
+        logger.info("Beginning Episode...")
 
         self._ros_rolloutbag.open()
-
-        assert (self.ros_is_good())
 
         return self._get_observation(), self._get_goal()
 
@@ -473,3 +583,10 @@ class CrazyflieEnv:
         #TODO: Flip logic to trash experiment when crazyflie is overturn
         
         return True
+
+    def is_upside_down(self):
+        alt = self._get_observation()[1][1]
+        if (alt > 0.05):
+            logger.debug("Crazyflie is upside down")
+            return True
+        return False

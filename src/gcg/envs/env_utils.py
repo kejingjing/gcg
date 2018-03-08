@@ -18,8 +18,9 @@ except:
 
 try:
     from gcg.envs.crazyflie.crazyflie_env import CrazyflieEnv
-except:
+except Exception as e:
     print('Not importing crazyflie')
+    print(str(e))
 
 
 def create_env(env_dict, seed=None):

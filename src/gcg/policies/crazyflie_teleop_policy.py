@@ -161,6 +161,7 @@ class CrazyflieTeleopPolicy(object):
         #     self.cmd = -1
 
         #repeat send at 10Hz
+        # print(self.curr_joy)
         if self.curr_joy:
 
             motion.is_flow_motion = self.is_flow_motion
@@ -224,35 +225,38 @@ class CrazyflieTeleopPolicy(object):
     #     saver_ckpt_name = '{0}_{1}{2}'.format(name, saver_name, ext)
     #     return saver_ckpt_name
 
-    # def save(self, ckpt_name, train=True):
-    #     if train:
-    #         savers_keys = [k for k in self._tf_dict['savers_dict'].keys() if 'inference' not in k]
-    #     else:
-    #         savers_keys = ['inference']
+    def save(self, ckpt_name, train=True):
+        # if train:
+        #     savers_keys = [k for k in self._tf_dict['savers_dict'].keys() if 'inference' not in k]
+        # else:
+        #     savers_keys = ['inference']
 
-    #     for saver_name in savers_keys:
-    #         saver = self._tf_dict['savers_dict'][saver_name]
-    #         saver.save(self._tf_dict['sess'], self._saver_ckpt_name(ckpt_name, saver_name), write_meta_graph=False)
+        # for saver_name in savers_keys:
+        #     saver = self._tf_dict['savers_dict'][saver_name]
+        #     saver.save(self._tf_dict['sess'], self._saver_ckpt_name(ckpt_name, saver_name), write_meta_graph=False)
+        pass
 
-    # def restore(self, ckpt_name, train=True, train_restore=('train',)):
-    #     """
-    #     :param: train_restore: 'train', 'image', 'observation', 'action', 'rnn', 'output
-    #     """
-    #     savers_keys = train_restore if train else ['inference']
+    def restore(self, ckpt_name, train=True, train_restore=('train',)):
+        """
+        :param: train_restore: 'train', 'image', 'observation', 'action', 'rnn', 'output
+        # """
+        # savers_keys = train_restore if train else ['inference']
 
-    #     for saver_name in savers_keys:
-    #         saver = self._tf_dict['savers_dict'][saver_name]
-    #         saver.restore(self._tf_dict['sess'], self._saver_ckpt_name(ckpt_name, saver_name))
+        # for saver_name in savers_keys:
+        #     saver = self._tf_dict['savers_dict'][saver_name]
+        #     saver.restore(self._tf_dict['sess'], self._saver_ckpt_name(ckpt_name, saver_name))
+        pass
 
     ###############
     ### Logging ###
     ###############
 
-    # def log(self):
-    #     for k in sorted(self._log_stats.keys()):
-    #         if k == 'Depth':
-    #             logger.record_tabular(k+'Mean', np.mean(self._log_stats[k]))
-    #             logger.record_tabular(k+'Std', np.std(self._log_stats[k]))
-    #         else:
-    #             logger.record_tabular(k, np.mean(self._log_stats[k]))
-    #     self._log_stats.clear()
+    def log(self):
+        # for k in sorted(self._log_stats.keys()):
+        #     if k == 'Depth':
+        #         logger.record_tabular(k+'Mean', np.mean(self._log_stats[k]))
+        #         logger.record_tabular(k+'Std', np.std(self._log_stats[k]))
+        #     else:
+        #         logger.record_tabular(k, np.mean(self._log_stats[k]))
+        # self._log_stats.clear()
+        pass
