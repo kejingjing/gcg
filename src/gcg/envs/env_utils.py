@@ -12,6 +12,7 @@ try:
     from gcg.envs.sim_rccar.simple_room_cluttered_env import SimpleRoomClutteredEnv
     from gcg.envs.sim_rccar.simple_room_backup_env import SimpleRoomBackupEnv
     from gcg.envs.sim_rccar.forest_env import ForestEnv
+    from gcg.envs.sim_rccar.outdoors_env import OutdoorsEnv
 except:
     print('Not importing sim_rccar')
 

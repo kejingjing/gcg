@@ -432,7 +432,7 @@ class ReplayPool(object):
                 'steps': self._steps[indices],
                 'observations_im': self._observations_im[indices] if self._save_rollouts_observations else None,
                 'observations_vec': self._observations_vec[indices] if self._save_rollouts_observations else None,
-                'goals': self._goals[indices] if self._save_rollouts_observations else None,
+                'goals': self._goals[indices],
                 'actions': self._actions[indices],
                 'rewards': self._rewards[indices],
                 'dones': self._dones[indices],
