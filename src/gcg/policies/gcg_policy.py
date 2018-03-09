@@ -518,7 +518,7 @@ class GCGPolicy(object):
             
             if output['use_bhat']:
                 bhat = bhats[output['name']]
-                bhat_label = self._graph_calculate_bhat_label(output['bhat_label'], target_inputs, target_yhats, target_bhats, target_values, goals, rewards)
+                bhat_label = self._graph_calculate_bhat_label(output['bhat_label'], target_inputs, target_yhats, target_bhats, target_values, goals, rewards, tf_dones)
 #                bhat_label = eval(output['bhat_label'])
                 bhat_loss = output['bhat_loss']
                 bhat_scale = output.get('bhat_scale', 1.0)
@@ -545,7 +545,14 @@ class GCGPolicy(object):
     def _graph_sub_cost(self, tf_train_values, tf_labels, mask, loss, scale):
         control_dependencies = []
         if loss == 'mse':
-            cost = tf.square(tf_train_values - tf_labels)
+            cost = 0.5 * tf.square(tf_train_values - tf_labels) / scale
+        elif loss == 'huber':
+            # Used implementation similar to tf github to avoid gradient issues
+            delta = 1.0 * scale
+            abs_diff = tf.abs(tf_train_values - tf_labels)
+            quadratic = tf.minimum(abs_diff, delta)
+            linear = (abs_diff - quadratic)
+            cost = (0.5 * quadratic**2 + delta * linear) / scale
         elif loss == 'xentropy':
             tf_labels /= scale
             tf_train_values /= scale
@@ -554,15 +561,12 @@ class GCGPolicy(object):
             control_dependencies += [tf.assert_greater_equal(tf_train_values, 0., name='cost_assert_4')]
             control_dependencies += [tf.assert_less_equal(tf_train_values, 1., name='cost_assert_5')]
             cost = tf_utils.xentropy(tf_train_values, tf_labels)
-        # TODO
-#        elif loss == 'sin_2':
-#            cost = tf.square(tf.sin(tf_train_values - tf_labels))
         else:
             raise NotImplementedError
         cost = tf.reduce_sum(cost * mask)
         return cost, control_dependencies
 
-    def _graph_calculate_bhat_label(self, bhat_label_str, target_inputs, target_yhats, target_bhats, target_values, goals, rewards):
+    def _graph_calculate_bhat_label(self, bhat_label_str, target_inputs, target_yhats, target_bhats, target_values, goals, rewards, dones):
         gammas = tf.pow(self._gamma, tf.range(self._H + 1, dtype=tf.float32))
         outputs_val = []
         for h in range(self._H):
