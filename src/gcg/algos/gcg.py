@@ -283,7 +283,8 @@ class GCG(object):
                 if step % self._log_every_n_steps == 0:
                     logger.record_tabular('Step', step)
                     self._sampler.log()
-                    self._eval_sampler.log(prefix='Eval')
+                    if self._eval_sampler:
+                        self._eval_sampler.log(prefix='Eval')
                     self._policy.log()
                     logger.dump_tabular(print_func=logger.info)
                     timeit.stop('total')

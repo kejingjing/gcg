@@ -16,10 +16,6 @@ from carla.client import CarlaClient
 from carla.settings import CarlaSettings
 from carla.sensor import Camera
 
-"""
-How to reset to arbitrary pose?
-- cannot, must use one of preset positions
-"""
 
 class CarlaEnv:
     RETRIES = 4
@@ -36,8 +32,8 @@ class CarlaEnv:
                           {
                               # for carla
                               'postprocessing': None,
-                              'position': (30, 0, 130),
-                              'fov': 90,
+                              'position': (210, 0, 140),
+                              'fov': 160, # x position and fov are correlated
 
                               # for us
                               'include_in_obs': True,
@@ -48,13 +44,15 @@ class CarlaEnv:
         params.setdefault('number_of_pedestrians', 0)
         params.setdefault('weather', -1)
 
-        params.setdefault('player_start_indices', None)
+        params.setdefault('player_start_indices', -1)
         params.setdefault('horizon', 1000)
         params.setdefault('goal_speed', 25) # km/hr
+        params.setdefault('steps_after_reset', 8)
 
         self._player_start_indices = params['player_start_indices']
         self.horizon = params['horizon']
         self._goal_speed = params['goal_speed']
+        self._steps_after_reset = params['steps_after_reset']
 
         self._params = params
         self._carla_server_process = None
@@ -71,6 +69,7 @@ class CarlaEnv:
         self.spec = None
         self._last_measurements = None
         self._last_sensor_data = None
+        self._t = 0
 
         ### setup
         self._setup_carla()
@@ -179,13 +178,12 @@ class CarlaEnv:
                                 high=np.array([v.high[0] for k, v in action_spec.items()]))
 
         action_selection_spec['steer'] = Box(low=-1., high=1.)
-        action_selection_spec['motor'] = Box(low=-0.5, high=1.)
+        action_selection_spec['motor'] = Box(low=0.25, high=1.) # min 0.25 --> 3km/h, need 1km/h to detect collisions
         action_selection_space = Box(low=np.array([v.low[0] for k, v in action_selection_spec.items()]),
                                           high=np.array([v.high[0] for k, v in action_selection_spec.items()]))
 
         assert (np.logical_and(action_selection_space.low >= action_space.low,
                                action_selection_space.high <= action_space.high).all())
-
 
         num_channels = 0
         for camera_name in self._params['cameras']:
@@ -246,6 +244,8 @@ class CarlaEnv:
     def _is_collision(self, measurements, sensor_data):
         pm = measurements.player_measurements
         coll = ((pm.collision_vehicles > 0) or (pm.collision_pedestrians > 0) or (pm.collision_other > 0))
+        if self._last_measurements:
+            coll = coll or (pm.forward_speed < 2 and self._last_measurements.player_measurements.forward_speed >= 2)
         return coll
 
     def _get_observation_im(self, measurements, sensor_data):
@@ -267,17 +267,20 @@ class CarlaEnv:
         pm = measurements.player_measurements
 
         obs_vec_d = {}
-        obs_vec_d['coll_car'] = (pm.collision_vehicles > 0)
-        obs_vec_d['coll_ped'] = (pm.collision_pedestrians > 0)
-        obs_vec_d['coll_oth'] = (pm.collision_other > 0)
-        obs_vec_d['coll'] = (obs_vec_d['coll_car'] or
-                             obs_vec_d['coll_ped'] or
-                             obs_vec_d['coll_oth'])
         obs_vec_d['heading'] = pm.transform.rotation.yaw
         obs_vec_d['speed'] = pm.forward_speed
         obs_vec_d['accel_x'] = pm.acceleration.x
         obs_vec_d['accel_y'] = pm.acceleration.y
         obs_vec_d['accel_z'] = pm.acceleration.z
+        obs_vec_d['coll_car'] = (pm.collision_vehicles > 0)
+        obs_vec_d['coll_ped'] = (pm.collision_pedestrians > 0)
+        obs_vec_d['coll_oth'] = (pm.collision_other > 0)
+        obs_vec_d['coll'] = self._is_collision(measurements, sensor_data)
+
+        # input('t: {0}, coll: {1}, speed: {2:.2f}, accel_x: {3:.2f}'.format(self._t,
+        #                                                                           obs_vec_d['coll'],
+        #                                                                           obs_vec_d['speed'],
+        #                                                                           obs_vec_d['accel_x']))
 
         obs_vec = np.array([obs_vec_d[k] for k in self.observation_vec_spec.keys()])
         return obs_vec
@@ -312,15 +315,15 @@ class CarlaEnv:
         if measurements is None or sensor_data is None:
             measurements, sensor_data = self._carla_client.read_data()
 
-        self._last_measurements = measurements
-        self._last_sensor_data = sensor_data
-
         next_observation = (self._get_observation_im(measurements, sensor_data),
                             self._get_observation_vec(measurements, sensor_data))
         goal = self._get_goal(measurements, sensor_data)
         reward = self._get_reward(measurements, sensor_data)
         done = self._get_done(measurements, sensor_data)
         env_info = self._get_env_info(measurements, sensor_data)
+
+        self._last_measurements = measurements
+        self._last_sensor_data = sensor_data
 
         return next_observation, goal, reward, done, env_info
 
@@ -335,6 +338,8 @@ class CarlaEnv:
             next_observation, goal, reward, done, env_info = self._get(measurements=self._last_measurements,
                                                                        sensor_data=self._last_sensor_data)
             done = True
+
+        self._t += 1
 
         return next_observation, goal, reward, done, env_info
 
@@ -352,8 +357,12 @@ class CarlaEnv:
         error = None
         for _ in range (CarlaEnv.RETRIES):
             try:
+                self._t = 0
                 self._carla_client.start_episode(player_start_idx)
                 next_observation, goal, reward, done, env_info = self._get()
+                for _ in range(self._steps_after_reset):
+                    action = 0.5 * (self.action_selection_space.low + self.action_selection_space.high)
+                    next_observation, goal, reward, done, env_info = self.step(action)
                 return next_observation, goal
             except Exception as e:
                 logger.warn('CarlaEnv: start episode error: {}'.format(e))
@@ -363,7 +372,16 @@ class CarlaEnv:
             logger.critical('CarlaEnv: Failed to restart after {0} attempts'.format(CarlaEnv.RETRIES))
             raise error
 
+
+def test_collision(env):
+    env.reset()
+    while True:
+        _, _, _, done, _ = env.step([1, 0.25])
+        if done:
+            break
+
 if __name__ == '__main__':
     logger.setup(display_name='CarlaEnv', log_path='/tmp/log.txt', lvl='debug')
     env = CarlaEnv()
+    test_collision(env)
     import IPython; IPython.embed()
