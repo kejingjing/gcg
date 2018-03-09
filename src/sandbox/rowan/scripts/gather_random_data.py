@@ -68,20 +68,28 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('env', type=str, choices=('SquareClutteredEnv',
                                                   'SquareClutteredColoredEnv',
-                                                  'SquareClutteredConeEnv'))
+                                                  'SquareClutteredExtraEnv'))
     parser.add_argument('steps', type=int)
+    parser.add_argument('-random_seed', type=int)
+    parser.add_argument('-use_alternative_restart_pos', type=bool)
+    parser.add_argument('-use_unfamiliar_extra_objects', type=bool)
+    parser.add_argument('-ignore_extra_object_collisions', type=bool)
     args = parser.parse_args()
 
     logger.setup(display_name='gather_random_data', log_path='/tmp/log.txt', lvl='debug')
 
-    if args.env == 'SquareClutteredEnv':
-        env = create_env("SquareClutteredEnv(params={'hfov': 120, 'do_back_up': True, 'collision_reward_only': True, 'collision_reward': -1, 'speed_limits': [2., 2.]})")
-    elif args.env == 'SquareClutteredColoredEnv':
-        env = create_env("SquareClutteredColoredEnv(params={'hfov': 120, 'do_back_up': True, 'collision_reward_only': True, 'collision_reward': -1, 'speed_limits': [2., 2.]})")
-    elif args.env == 'SquareClutteredConeEnv':
-        env = create_env("SquareClutteredConeEnv(params={'hfov': 120, 'do_back_up': False, 'collision_reward_only': True, 'collision_reward': -1, 'speed_limits': [2., 2.]})")
-    else:
-        raise NotImplementedError
+    # TODO: rowan's hack:
+    env_dict = {'class': args.env}
+    env_dict['params'] = {'hfov': 120,
+                          'do_back_up': True,
+                          'collision_reward_only': True,
+                          'collision_reward': -1,
+                          'speed_limits': [2., 2.],
+                          'use_alternative_restart_pos': args.use_alternative_restart_pos,
+                          'use_unfamiliar_extra_objects': args.use_unfamiliar_extra_objects,
+                          'ignore_extra_object_collisions': args.ignore_extra_object_collisions}
+
+    env = create_env(env_dict, args.random_seed)
 
     curr_dir = os.path.realpath(os.path.dirname(__file__))
     data_dir = os.path.join(curr_dir[:curr_dir.find('gcg/src')], 'gcg/data')
