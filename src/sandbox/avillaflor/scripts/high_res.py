@@ -106,4 +106,4 @@ if __name__ == '__main__':
     env = ForestEnv(params=params)
     hr = HighRes(args.data_path, args.save_dir, env)
     hr.plot_trajectories()
-    hr.take_hr_images()
+#    hr.take_hr_images()

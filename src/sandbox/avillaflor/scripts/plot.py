@@ -104,7 +104,10 @@ class Plot:
                 env_infos = trajectory['env_infos'][:-1]
 #                reward = sum([ for env_info in env_infos])
                 reward = sum(trajectory['rewards'][:-1])
+#                reward = np.mean([info['vel'] for info in env_infos[:16]])
 #                reward = np.mean([env_info['vel'] for env_info in env_infos[8:-1]])
+#                reward = sum([abs(1. - env_info['vel']/2.) for env_info in env_infos[:-1]])
+#                reward = np.min(trajectory['rewards'][:-2] + np.array([(1. - env_info['vel']/2.)**2 for env_info in env_infos[:-1]]))
 #                reward = len(trajectory['rewards'][:-1])
                 coll = int(env_infos[-1]['coll'])
                 rewards.append(reward)
@@ -121,6 +124,7 @@ class Plot:
                 avg_crashes.append(np.mean(crashes[-80:]))
                 avg_rewards.append(np.mean(rewards[-80:]))
 
+        print(avg_rewards[-1])
         return avg_crashes, avg_rewards, times
 
     ################
@@ -148,33 +152,34 @@ class Plot:
         else:
             rollouts = self._rollouts
         for itr, rollout in enumerate(rollouts):
-            plt.figure()
-            if testing:
-                plt.title('Trajectories for testing itr {0}'.format(itr))
-            else:
-                plt.title('Trajectories for itr {0}'.format(itr))
-            plt.xlabel('X position')
-            plt.ylabel('Y position')
-            # TODO
-            plt.ylim([-22.5, 22.5])
-            plt.xlim([-22.5, 22.5])
-            plt.legend(handles=[blue_line, red_line], loc='center')
-            for trajectory in rollout:
-                env_infos = trajectory['env_infos'][:-1]
-                is_coll = env_infos[-1]['coll']
-                pos_x = []
-                pos_y = []
-                for env_info in env_infos:
-                    pos = env_info['pos']
-                    pos_x.append(pos[0])
-                    pos_y.append(pos[1])
-                if is_coll:
-                    plt.plot(pos_x, pos_y, color='r')
-                    plt.scatter(pos_x[-1], pos_y[-1], marker="x", color='r')
+            if not os.path.exists(self._plot_trajectories_file(itr, testing)):
+                plt.figure()
+                if testing:
+                    plt.title('Trajectories for testing itr {0}'.format(itr))
                 else:
-                    plt.plot(pos_x, pos_y, color='b')
-            plt.savefig(self._plot_trajectories_file(itr, testing)) 
-            plt.close()
+                    plt.title('Trajectories for itr {0}'.format(itr))
+                plt.xlabel('X position')
+                plt.ylabel('Y position')
+                # TODO
+                plt.ylim([-12.5, 12.5])
+                plt.xlim([-12.5, 12.5])
+                plt.legend(handles=[blue_line, red_line], loc='center')
+                for trajectory in rollout:
+                    env_infos = trajectory['env_infos'][:-1]
+                    is_coll = env_infos[-1]['coll']
+                    pos_x = []
+                    pos_y = []
+                    for env_info in env_infos:
+                        pos = env_info['pos']
+                        pos_x.append(pos[0])
+                        pos_y.append(pos[1])
+                    if is_coll:
+                        plt.plot(pos_x, pos_y, color='r')
+                        plt.scatter(pos_x[-1], pos_y[-1], marker="x", color='r')
+                    else:
+                        plt.plot(pos_x, pos_y, color='b')
+                plt.savefig(self._plot_trajectories_file(itr, testing)) 
+                plt.close()
 
 ############
 ### Main ###
