@@ -50,9 +50,11 @@ class CarlaEnv:
 
         params.setdefault('player_start_indices', None)
         params.setdefault('horizon', 1000)
+        params.setdefault('goal_speed', 25) # km/hr
 
         self._player_start_indices = params['player_start_indices']
         self.horizon = params['horizon']
+        self._goal_speed = params['goal_speed']
 
         self._params = params
         self._carla_server_process = None
@@ -205,6 +207,8 @@ class CarlaEnv:
         observation_vec_spec['accel_y'] = Box(low=-100., high=100.)
         observation_vec_spec['accel_z'] = Box(low=-100., high=100.)
 
+        goal_spec['speed'] = Box(low=-50.0, high=50.0)
+
         self.action_spec, self.action_selection_spec, self.observation_vec_spec, self.goal_spec, \
         self.action_space, self.action_selection_space, self.observation_im_space = \
             action_spec, action_selection_spec, observation_vec_spec, goal_spec, \
@@ -279,7 +283,7 @@ class CarlaEnv:
         return obs_vec
 
     def _get_goal(self, measurements, sensor_data):
-        return np.array([])
+        return np.array([self._goal_speed])
 
     def _get_reward(self, measurements, sensor_data):
         if self._is_collision(measurements, sensor_data):
