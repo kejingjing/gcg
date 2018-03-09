@@ -164,6 +164,7 @@ policy:
 
   class: GCGPolicy # <GCGPolicy> model class
   GCGPolicy: &idGCGPolicy
+    goal_in_obs: False
     # actions, yhats, bhats, values, goals are available
     rew_fn: "values['rew']"
 
