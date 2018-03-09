@@ -473,6 +473,9 @@ class CarEnv(DirectObject):
     def _get_goal(self):
         return np.array([])
 
+    def get_front_cam_obs(self):
+        return self._camera_sensor.observe()[0]
+
     def process(self, image, obs_shape):
         if self._use_depth:
             im = np.reshape(image, (image.shape[0], image.shape[1]))

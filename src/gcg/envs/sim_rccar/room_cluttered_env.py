@@ -65,7 +65,7 @@ class RoomClutteredEnv(SquareEnv):
                 reward = self._collision_reward
             else:
                 heading_reward = np.cos(self._goal_heading - self._get_heading())
-                speed_reward = - (((self._goal_speed - self._get_speed()) / self._goal_speed) ** 2)
+                speed_reward = - (((self._goal_speed - self._get_speed()) / abs(self._goal_speed)) ** 2)
                 reward = heading_reward + speed_reward
         assert(reward <= self.max_reward)
         return reward
