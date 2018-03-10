@@ -206,8 +206,8 @@ class GCG(object):
 
         train_itr = self._get_train_itr()
         inference_itr = self._get_inference_itr()
-        assert (train_itr == inference_itr,
-                'Train itr is {0} but inference itr is {1}'.format(train_itr, inference_itr))
+        assert train_itr == inference_itr, \
+                'Train itr is {0} but inference itr is {1}'.format(train_itr, inference_itr)
         return train_itr
 
     ########################
@@ -218,7 +218,9 @@ class GCG(object):
         ### restore where we left off
         save_itr = self._restore()
 
-        target_updated = False
+        # TODO note this is the right step, but the trajectories might not all have been saved
+        start_step = save_itr * self._save_every_n_steps 
+        target_updated = start_step > self._update_target_after_n_steps:
         eval_rollouts = []
 
         self._sampler.reset()
@@ -227,7 +229,7 @@ class GCG(object):
 
         timeit.reset()
         timeit.start('total')
-        for step in range(0, self._total_steps, self._sampler.n_envs):
+        for step in range(start_step, self._total_steps, self._sampler.n_envs):
             ### sample and add to buffer
             if step > self._sample_after_n_steps:
                 timeit.start('sample')
@@ -237,7 +239,7 @@ class GCG(object):
                 timeit.stop('sample')
 
             ### sample and DON'T add to buffer (for validation)
-            if self._eval_sampler is not None and step > 0 and step % self._eval_every_n_steps == 0:
+            if self._eval_sampler is not None and step > start_step and (step + 1) % self._eval_every_n_steps == 0:
                 timeit.start('eval')
                 for _ in range(self._rollouts_per_eval):
                     eval_rollouts_step = []
@@ -275,12 +277,12 @@ class GCG(object):
                         timeit.stop('train')
 
                 ### update target network
-                if step > self._update_target_after_n_steps and step % self._update_target_every_n_steps == 0:
+                if step > self._update_target_after_n_steps and (step + 1) % self._update_target_every_n_steps == 0:
                     self._policy.update_target()
                     target_updated = True
 
                 ### log
-                if step % self._log_every_n_steps == 0:
+                if (step + 1) % self._log_every_n_steps == 0:
                     logger.record_tabular('Step', step)
                     self._sampler.log()
                     self._eval_sampler.log(prefix='Eval')
@@ -293,7 +295,7 @@ class GCG(object):
                     timeit.start('total')
 
             ### save model
-            if step > 0 and step % self._save_every_n_steps == 0:
+            if step > start_step and (step + 1) % self._save_every_n_steps == 0:
                 logger.info('Saving files for itr {0}'.format(save_itr))
                 self._save(save_itr, self._sampler.get_recent_paths(), eval_rollouts)
                 save_itr += 1
