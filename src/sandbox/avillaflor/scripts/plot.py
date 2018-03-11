@@ -20,7 +20,7 @@ class Plot:
         else:
             self._name = os.path.split(self._data_dir)[-1]
         self._rollouts = self._get_rollouts() 
-        self._rollouts_eval = self._get_rollouts(testing=True) 
+        self._rollouts_eval = self._get_rollouts(testing=True)
 
     #############
     ### Files ###
@@ -41,10 +41,10 @@ class Plot:
 
     def _plot_trajectories_file(self, itr, testing=False):
         if testing:
-            suffix = 'testing'
+            suffix = '_testing'
         else:
             suffix = ''
-        return os.path.join(self._image_folder, 'trajectories_{0}_{1}.png'.format(itr, suffix))
+        return os.path.join(self._image_folder, 'trajectories_{0:04d}{1}.png'.format(itr, suffix))
 
     ###############
     ### Getters ###
@@ -119,7 +119,7 @@ class Plot:
                         avg_crashes.append(np.mean(crashes[-20:]))
                         avg_rewards.append(np.mean(rewards[-20:]))
             if testing:
-                time_tot += 10000./240.
+                time_tot += 1000/240.
                 times.append(time_tot)
                 avg_crashes.append(np.mean(crashes[-80:]))
                 avg_rewards.append(np.mean(rewards[-80:]))

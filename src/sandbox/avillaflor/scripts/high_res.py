@@ -20,7 +20,7 @@ class HighRes:
     #############
 
     def _itr_folder(self, itr):
-        path = os.path.join(self._save_dir, 'itr_{0}'.format(itr))
+        path = os.path.join(self._save_dir, 'itr_{0:04d}'.format(itr))
         if not os.path.exists(path):
             os.makedirs(path)
         return path
@@ -31,7 +31,7 @@ class HighRes:
 
     def _high_res_image_file(self, itr, step):
         folder = self._itr_folder(itr)
-        return os.path.join(folder, 'image_{0}.png'.format(step))
+        return os.path.join(folder, 'image_{0:04d}.png'.format(step))
     
     ############
     ### Data ###
@@ -76,6 +76,7 @@ class HighRes:
             plt.scatter(pos_x, pos_y, s=1)
 #            plt.scatter(goal_x, goal_y, s=100, marker='x')
             plt.savefig(self._plot_traj_file(itr))
+            plt.close()
 
     def take_hr_images(self):
         for itr, rollout in enumerate(self._rollouts):
@@ -92,6 +93,7 @@ class HighRes:
                 ax = plt.axes()
                 ax.arrow(640, 480, 120 * np.sin(angle), -120 * np.cos(angle), head_width=50., head_length=25., width=25., fc='k', ec='k')
                 plt.savefig(self._high_res_image_file(itr, i)) 
+                plt.close()
 
 ############
 ### Main ###
@@ -101,9 +103,11 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('data_path', type=str)
     parser.add_argument('save_dir', type=str)
+    parser.add_argument('--no_images', action='store_true')
     args = parser.parse_args()
     params = {'size': [1280, 720]}
     env = ForestEnv(params=params)
     hr = HighRes(args.data_path, args.save_dir, env)
     hr.plot_trajectories()
-#    hr.take_hr_images()
+    if not args.no_images:
+        hr.take_hr_images()

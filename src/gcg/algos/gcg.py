@@ -220,7 +220,7 @@ class GCG(object):
 
         # TODO note this is the right step, but the trajectories might not all have been saved
         start_step = save_itr * self._save_every_n_steps 
-        target_updated = start_step > self._update_target_after_n_steps:
+        target_updated = start_step > self._update_target_after_n_steps
         eval_rollouts = []
 
         self._sampler.reset()
@@ -239,7 +239,7 @@ class GCG(object):
                 timeit.stop('sample')
 
             ### sample and DON'T add to buffer (for validation)
-            if self._eval_sampler is not None and step > start_step and (step + 1) % self._eval_every_n_steps == 0:
+            if self._eval_sampler is not None and step > start_step and (step + self._sampler.n_envs) % self._eval_every_n_steps == 0:
                 timeit.start('eval')
                 for _ in range(self._rollouts_per_eval):
                     eval_rollouts_step = []
@@ -282,7 +282,7 @@ class GCG(object):
                     target_updated = True
 
                 ### log
-                if (step + 1) % self._log_every_n_steps == 0:
+                if (step + self._sampler.n_envs) % self._log_every_n_steps == 0:
                     logger.record_tabular('Step', step)
                     self._sampler.log()
                     self._eval_sampler.log(prefix='Eval')
@@ -295,13 +295,14 @@ class GCG(object):
                     timeit.start('total')
 
             ### save model
-            if step > start_step and (step + 1) % self._save_every_n_steps == 0:
+            if step > start_step and (step + self._sampler.n_envs) % self._save_every_n_steps == 0:
                 logger.info('Saving files for itr {0}'.format(save_itr))
                 self._save(save_itr, self._sampler.get_recent_paths(), eval_rollouts)
                 save_itr += 1
                 eval_rollouts = []
 
-        self._save(save_itr, self._sampler.get_recent_paths(), eval_rollouts)
+        if step + self._sampler.n_envs > self._total_steps:
+            self._save(save_itr, self._sampler.get_recent_paths(), eval_rollouts)
 
 def run_gcg(params, is_continue):
     curr_dir = os.path.dirname(__file__)
