@@ -139,7 +139,6 @@ class CrazyflieEnv:
         self._pause = False
         self._curr_joy = None
 
-
         self._setup_spec()
         assert (self.observation_im_space.shape[-1] == 1 or self.observation_im_space.shape[-1] == 3)
         self.spec = EnvSpec(
@@ -158,6 +157,7 @@ class CrazyflieEnv:
         # self._backup_steer_range = params['backup_steer_range']
         self._press_enter_on_reset = params['press_enter_on_reset']
 
+        self.min_voltage = 4
         ### ROS
         if not ROS_IMPORTED:
             logger.warn('ROS not imported')
@@ -171,6 +171,7 @@ class CrazyflieEnv:
             ('cf/0/image', sensor_msgs.msg.CompressedImage),
             ('cf/0/data', crazyflie.msg.CFData),
             ('cf/0/coll', std_msgs.msg.Bool),
+            ('cf/0/motion', crazyflie.msg.CFMotion)
 
             # ('mode', std_msgs.msg.Int32),
             # ('steer', std_msgs.msg.Float32),
@@ -195,8 +196,12 @@ class CrazyflieEnv:
         for topic, type in self._ros_topics_and_types.items():
             rospy.Subscriber(topic, type, self.ros_msg_update, (topic,))
         
+        #writing to this, but we also want to record this
         self._ros_motion_pub = rospy.Publisher("/cf/0/motion", crazyflie.msg.CFMotion, queue_size=10)
         self._ros_command_pub = rospy.Publisher("/cf/0/command", crazyflie.msg.CFCommand, queue_size=10)
+        #test
+        print("sending");
+        self._ros_command_pub.publish(crazyflie.msg.CFCommand())
 
         # separate from big list
         if self._use_joy_commands:
@@ -256,6 +261,7 @@ class CrazyflieEnv:
 
 
 
+
     def _get_observation(self):
         msg = self._ros_msgs['cf/0/image']
 
@@ -282,6 +288,8 @@ class CrazyflieEnv:
         # accel_z = data.accel_z
         # v_batt = data.v_batt
         # alt = data.alt
+        if data.v_batt < self.min_voltage:
+            self.min_voltage = data.v_batt
 
         vec = np.array([coll, data.alt, data.v_batt, data.accel_x, data.accel_y, data.accel_z])
 
@@ -326,7 +334,7 @@ class CrazyflieEnv:
         #     print("STOPPING MANUALLY")
         #     print(self._curr_joy.buttons)
         #     print(self._joy_stop_btn)
-        return self._get_joy_stop() or self._get_collision()
+        return self._get_joy_stop() or self._get_collision() or self.is_low_on_battery()
 
     '''    def _set_steer(self, steer):
         self._ros_steer_pub.publish(std_msgs.msg.Float32(steer))
@@ -360,6 +368,7 @@ class CrazyflieEnv:
         #0 is ESTOP, 1 IS LAND, 2 IS TAKEOFF
         command = crazyflie.msg.CFCommand()
         command.cmd = cmd
+        # print("calling cmd: ", cmd)
         self._ros_command_pub.publish(command)
 
 
@@ -384,10 +393,17 @@ class CrazyflieEnv:
 
         if not offline:
             assert (self.ros_is_good())
+        #logger.info("B")
+        if not self._ros_rolloutbag.is_open and self._get_joy_start():
+            logger.info("Beginning Episode...")
+            self._ros_rolloutbag.open()
+        elif not self._ros_rolloutbag.is_open:
+            logger.debug("Waiting for Start (Joystick input)...")
 
+        #logger.info("C")
         action = np.asarray(action)
         if not (np.logical_and(action >= self.action_space.low, action <= self.action_space.high).all()):
-            logger.warn('Action {0} will be clipped to be within bounds: {1}, {2}'.format(action,
+            logger.warn('Action {0} will be clipped to beget_obser within bounds: {1}, {2}'.format(action,
                                                                                           self.action_space.low,
                                                                                           self.action_space.high))
             action = np.clip(action, self.action_space.low, self.action_space.high)
@@ -409,19 +425,23 @@ class CrazyflieEnv:
         if done:
             if self._get_collision():
                 logger.warn('-- COLLISION --')
+            elif self.is_low_on_battery():
+                logger.warn('-- LOW ON BATTERY --')
             elif self._get_joy_stop():
                 logger.warn('-- MANUALLY STOPPED --')
 
         env_info = dict()
 
         self._t += 1
-
-        if not offline:
+        #logger.info("E")
+        if not offline and self._ros_rolloutbag.is_open:
             self._ros_rolloutbag.write_all(self._ros_topics_and_types.keys(), self._ros_msgs, self._ros_msg_times)
             if done:
                 logger.debug('Done after {0} steps'.format(self._t))
                 self._t = 0
                 self._ros_rolloutbag.close()
+
+        #logger.info("F")
 
         return next_observation, goal, reward, done, env_info
 
@@ -462,18 +482,31 @@ class CrazyflieEnv:
                 self._ros_rolloutbag.trash()
 
 
-        #waiting for crash to be stable
-        rospy.sleep(1.0)
 
-        if self._press_enter_on_reset or self.is_upside_down():
+        if self._is_collision:
+            logger.debug('Resetting (collision)')
+        elif self._get_joy_stop():
+            logger.debug('Resetting (joy stop)')
+        else:
+            # print(self._curr_joy)
+            logger.debug('Resetting (other)')
+
+
+        #waiting for crash to be stable
+        rospy.sleep(2.0)
+
+        if self._press_enter_on_reset:
             logger.info('Resetting, press enter to continue')
             input()
-        else:
-            if self._is_collision:
-                logger.debug('Resetting (collision)')
-            else:
-                # print(self._curr_joy)
-                logger.debug('Resetting (no collision)')
+        elif self.is_low_on_battery():
+            logger.info('Crazyflie is low on battery')
+            logger.info(self.min_voltage)
+            logger.info('Resetting, press enter to continue')
+            input()
+        elif self.is_upside_down():
+            logger.info('Crazyflie is upside down')
+            logger.info('Resetting, press enter to continue')
+            input()
 
         
         self.reset_state()
@@ -492,7 +525,7 @@ class CrazyflieEnv:
         rospy.sleep(2.0)
 
         # must be after resetting curr_joy
-        if self._use_joy_commands:
+        '''if self._use_joy_commands:
             logger.debug("Waiting for Start (Joystick input)...")
             while not self._get_joy_start() and not self._get_done():
                 pass
@@ -500,11 +533,13 @@ class CrazyflieEnv:
                 logger.warn("* Joystick input bypassed - (likely due to collision) *")
                 # reset again
                 return self.reset(offline, keep_rosbag)
-            self._curr_joy = None
+            self._curr_joy = None'''
 
-        logger.info("Beginning Episode...")
 
-        self._ros_rolloutbag.open()
+        if not self._use_joy_commands:
+            logger.info("Beginning Episode...")
+            self._ros_rolloutbag.open()
+        #logger.info("A")
 
         return self._get_observation(), self._get_goal()
 
@@ -557,7 +592,7 @@ class CrazyflieEnv:
         # logger.debug(str(self._ros_msg_times))
 
         for topic in self._ros_topics_and_types.keys():
-            if 'cmd' not in topic and 'coll' not in topic:
+            if 'cmd' not in topic and 'coll' not in topic and 'motion' not in topic:
                 if topic not in self._ros_msg_times:
                     if print:
                         logger.debug('Topic {0} has never been received'.format(topic))
@@ -587,6 +622,12 @@ class CrazyflieEnv:
     def is_upside_down(self):
         alt = self._get_observation()[1][1]
         if (alt > 0.05):
-            logger.debug("Crazyflie is upside down")
             return True
         return False
+
+    def is_low_on_battery(self):
+        if (self.min_voltage < 2.8):
+            return True
+        else:
+            #logger.debug(self.min_voltage)
+            return False

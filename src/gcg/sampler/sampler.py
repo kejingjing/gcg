@@ -1,6 +1,7 @@
 import itertools
 import pickle
 import numpy as np
+import time 
 
 from gcg.envs.spaces.discrete import Discrete
 from gcg.envs.env_utils import create_env
@@ -71,6 +72,7 @@ class Sampler(object):
             encoded_observations_im.append(encoded_observation[0])
             encoded_observations_vec.append(encoded_observation[1])
 
+        # st = time.time()
         ### get actions
         if take_random_actions:
             assert (actions is None)
@@ -87,6 +89,10 @@ class Sampler(object):
             else:
                 assert (len(actions) == self.n_envs)
                 action_infos = [dict()] * len(actions)
+
+        # elapsed_t = time.time() - st
+        # print("Elapsed in inference:", elapsed_t)
+
 
         ### take step
         next_observations, goals, rewards, dones, env_infos = self._vec_env.step(actions, **kwargs)
