@@ -72,7 +72,7 @@ class Sampler(object):
             encoded_observations_im.append(encoded_observation[0])
             encoded_observations_vec.append(encoded_observation[1])
 
-        # st = time.time()
+        st = time.time()
         ### get actions
         if take_random_actions:
             assert (actions is None)
@@ -90,8 +90,8 @@ class Sampler(object):
                 assert (len(actions) == self.n_envs)
                 action_infos = [dict()] * len(actions)
 
-        # elapsed_t = time.time() - st
-        # print("Elapsed in inference:", elapsed_t)
+        elapsed_t = time.time() - st
+        print("Elapsed in inference:", elapsed_t)
 
 
         ### take step
